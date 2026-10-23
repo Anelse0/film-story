@@ -52,7 +52,7 @@ ANTITHESIS = [re.compile(p, re.I) for p in (
     r"\bthat's not\b[^.?!]{1,40}\.\s*that's\b", r"\bnever\b[^.?!]{1,30}\balways\b", r"\balways\b[^.?!]{1,30}\bnever\b")]
 EMO_PAREN = re.compile(r"(?<!压)低声|[，,]\s*平[）)]|平静|冷冷|冷淡|讽刺|深情|愤怒|悲伤|激动|温柔|坚定|quietly|coldly|softly|sarcastic|"
                        r"angrily|bitterly|tenderly|firmly|calmly", re.I)
-HEADER_WORDS = {'承接', '后续', '版本', '状态', '依据', '位置', '标题', '场序', '人物', '服装说明', '声音', '气场', '设计取向', '主线', '说明', '来源', '注', '新事实', '新事实（提案）', '本场改变了什么', '改动清单', '连带影响'}
+HEADER_WORDS = {'承接', '后续', '版本', '状态', '依据', '位置', '标题', '场序', '人物', '服装说明', '声音', '气场', '设计取向', '主线', '说明', '来源', '注', '新事实', '新事实（提案）', '本场改变了什么', '改动清单', '连带影响', '本版改动', '改', '删', '加', '备选', '批注', '上一版'}
 
 
 def extract(path):
