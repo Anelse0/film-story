@@ -143,9 +143,9 @@ def analyse(scene):
             best, best_span = run, (L[k - run]['raw_no'], cur['raw_no'])
     out['longest_linked_run'] = best
     if best + 1 >= THRESH['pingpong_run']:
-        out['flags'].append(f"问答式对接：连续 {best + 1} 句每句都精准接上一句（行 {best_span[0]}–{best_span[1]}）。看是否需要延迟、偏移、落在动作或第三人身上 [推论]")
+        out['flags'].append(f"问答式对接：连续 {best + 1} 句每句都精准接上一句（行 {best_span[0]}–{best_span[1]}）。考虑让其中一句延迟、偏移，或落在动作 / 第三人身上 [推论]")
     if out['short_share'] >= THRESH['short_share_warn'] and len(L) >= 6:
-        out['flags'].append(f"短句占比 {out['short_share']:.0%}：像一人一句的标语，还是有来回？人判 [推论]")
+        out['flags'].append(f"短句占比 {out['short_share']:.0%}：核对是口号式的一人一句，还是有真实往来（需人工判断）[推论]")
 
     marks = []
     for k, x in enumerate(L):
@@ -165,9 +165,9 @@ def analyse(scene):
     emo = [p for p in scene['parens'] if EMO_PAREN.search(p)]
     if emo:
         out['emotion_parens'] = emo
-        out['flags'].append(f"{len(emo)} 处括号写的是情绪标签而不是可见动作（例：{emo[0]}）。按本场处境定强度，不从小传套 [用户纠正 10-16]")
+        out['flags'].append(f"{len(emo)} 处括号写的是情绪标签而不是可见动作（例：{emo[0]}）。强度依本场处境确定，不套用人物小传 [用户纠正 10-16]")
     if out['est_seconds'] > 30:
-        out['flags'].append(f"台词约 {out['est_seconds']} s（4 词/秒），一条 clip 放不下，生产要切 ≥{int(out['est_seconds'] // 30) + 1} 条；是否每句都值得占时间？")
+        out['flags'].append(f"台词约 {out['est_seconds']} s（4 词/秒），超出单条 clip 时长，制作需拆为 ≥{int(out['est_seconds'] // 30) + 1} 条；逐句确认是否必要")
     return out
 
 
@@ -192,10 +192,10 @@ def main():
         for fl in r['flags']:
             print('  ! ' + fl)
         if r['marked_lines']:
-            print('  需人判的句子：')
+            print('  需人工判断的台词：')
             for m in r['marked_lines']:
                 print(f"    行{m['line']} {m['speaker']}: “{m['text']}”  ← {', '.join(m['tags'])}")
-    print('\n说明：以上只是线索。标记多不等于台词差，没标记不等于台词好；真正的判断看这句是不是这个人此刻会对这个人说的话。')
+    print('\n说明：以上仅为结构线索。标记多不代表台词差，无标记不代表台词好；判断标准是这句是否为该人物在当下处境中会对对方说的话。')
 
 
 if __name__ == '__main__':
