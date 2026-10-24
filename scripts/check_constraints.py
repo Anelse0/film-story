@@ -1,74 +1,101 @@
 #!/usr/bin/env python3
 """约束检查（film-story）。把场景稿和项目约束文件对一遍，报：
-  - 稿里出现、约束里没登记的人名（可能是擅自新增人物）
-  - 禁用词（例：亲密动作、点破关系的词）
-  - 场景头部必填项有没有
-  - 每场说话人数 ≥3 的提示（竖幅同框限制）
-  - 每场台词时长估算
+  - 场景头部必填项有没有（只查正文标记之前）
+  - 禁用词（只查正文；本版改动、批注里引用的旧句不算）
+  - 每场说话人，画内 / 画外分开；画内说话人超过同框上限时提示（同框人数看动作描写，脚本不推算）
+  - 动作描写里提到的已登记人物（核对谁在场）
+  - 稿里出现、约束里没登记的说话人（可能是擅自新增人物）
+  - 正文中的其他大写词（核对是否有未经确认的人名 / 地名 / 品牌）
+  - 每场台词时长估算（约束文件有"制作参数"时）
 
-用法: python3 check_constraints.py scene.md --constraints constraints.md
-约束文件格式见 templates/constraints.md。退出码恒为 0，不替人判。"""
+用法: python3 check_constraints.py scene.md [--constraints <项目>/story/constraints.md] [--lang auto|en|zh]
+不给 --constraints 时从场景文件往上找 story/constraints.md。约束文件格式见 templates/constraints.md。
+退出码恒为 0，不替人判。"""
 import argparse, re, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check_dialogue import extract, WORD, THRESH  # noqa
+from check_dialogue import START, END, body_lines, parse, size_of, speaker_table  # noqa: E402
+from project_config import find_constraints, load_constraints  # noqa: E402
 
-SECTION = re.compile(r'^##\s*(.+?)\s*$')
+FORMAT_CUES = {'voice', 'narrator', '旁白', '画外', '画外音', 'v.o.', 'o.s.'}  # 格式词，不是人名
+CAP = re.compile(r'\b([A-Z][a-z]{2,})\b')
+CAP_STOP = {'The', 'And', 'But', 'Okay', 'Yeah', 'Hey'}
 
 
-def load_constraints(path):
-    cons = {'人物': set(), '地点': set(), '禁用': [], '必填头部': [], '同框上限': 2}
-    cur = None
-    for line in Path(path).read_text(encoding='utf-8').splitlines():
-        m = SECTION.match(line.strip())
-        if m:
-            cur = m.group(1); continue
-        s = line.strip().lstrip('-').strip()
-        if not s or not cur:
-            continue
-        if cur.startswith('人物'):
-            for name in re.split(r'[,，/｜|]', s):
-                name = name.strip()
-                if name: cons['人物'].add(name)
-        elif cur.startswith('地点'):
-            cons['地点'].add(s)
-        elif cur.startswith('禁用'):
-            cons['禁用'].append(s)
-        elif cur.startswith('必填'):
-            cons['必填头部'].append(s)
-        elif cur.startswith('同框'):
-            try: cons['同框上限'] = int(re.findall(r'\d+', s)[0])
-            except Exception: pass
-    return cons
+def caps_candidates(lines, known, places):
+    """正文里句中出现的大写词（句首、引号或破折号之后的不算）。"""
+    out = set()
+    for _, t in lines:
+        for m in CAP.finditer(t):
+            before = t[:m.start()].rstrip()
+            if not before or before[-1] in '.!?—…“"\'(（-–:：':
+                continue
+            w = m.group(1)
+            if w in CAP_STOP or w.casefold() in known or w.casefold() in places:
+                continue
+            out.add(w)
+    return sorted(out)
+
+
+def name_pattern(n):
+    if re.search(r'[A-Za-z]', n):
+        return re.compile(r'(?<![A-Za-z])' + re.escape(n) + r'(?![A-Za-z])', re.I)
+    return re.compile(re.escape(n))
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('file'); ap.add_argument('--constraints', required=True)
+    ap = argparse.ArgumentParser(description='约束检查（film-story）：只报线索，不替人判。')
+    ap.add_argument('file')
+    ap.add_argument('--constraints', help='项目约束文件；不给时从场景文件往上找 story/constraints.md')
+    ap.add_argument('--lang', choices=('auto', 'en', 'zh'), default='auto')
     a = ap.parse_args()
-    cons = load_constraints(a.constraints)
-    text = Path(a.file).read_text(encoding='utf-8')
+    cfg = Path(a.constraints) if a.constraints else find_constraints(a.file)
+    if not cfg or not cfg.is_file():
+        print(f"== {a.file} ==\n  ⚠ 没有约束文件（{a.constraints or '往上没找到 story/constraints.md'}）；先按 templates/constraints.md 建一份")
+        return
+    cons = load_constraints(cfg)
+    src = Path(a.file).read_text(encoding='utf-8').splitlines()
+    body, note = body_lines(src)
+    first = next((i for i, l in enumerate(src) if START.search(l) or END.search(l)), len(src))
+    header = '\n'.join(src[:first])
     print(f"== {a.file} ==")
-    missing = [h for h in cons['必填头部'] if h not in text]
+    if note == 'no-markers':
+        print('  正文：未找到正文标记，按全文查（旧文件兼容）')
+    elif note != 'markers':
+        print(f'  ⚠ 正文标记不成对：{note}，按能推断的范围查；请修正标记')
+    missing = [h for h in cons['必填头部'] if h not in header]
     print('  头部必填项：' + ('齐' if not missing else '缺 ' + '、'.join(missing)))
     hits = []
     for w in cons['禁用']:
-        for m in re.finditer(re.escape(w), text, re.I):
-            ln = text.count('\n', 0, m.start()) + 1
-            hits.append(f"行{ln} “{w}”")
-    print('  禁用词：' + ('无' if not hits else '；'.join(hits)))
-    known = {n.lower() for n in cons['人物']}
-    seen = {}
-    for sc in extract(a.file):
-        spk = {x['speaker'] for x in sc['lines']}
-        unknown = [s for s in spk if s.lower() not in known and s.lower() not in ('reporter', 'staffer', 'presenter', 'photographer', 'voice', '画外')]
-        est = round(sum(len(WORD.findall(x['text'])) for x in sc['lines']) / THRESH['words_per_sec'], 1)
-        print(f"  场「{sc['title']}」：说话人 {len(spk)} 人 {sorted(spk)} · 台词约 {est} s" + (f" · ⚠ 超过同框上限 {cons['同框上限']} 人，分镜要拆正反打或纵深错落" if len(spk) > cons['同框上限'] else ''))
+        pat = re.compile(re.escape(w), re.I)
+        hits += [f"行{no} “{w}”" for no, t in body if pat.search(t)]
+    print('  禁用词（只查正文）：' + ('无' if not hits else '；'.join(hits)))
+
+    names = {n.casefold(): n for n in cons['人物']}
+    places = {p.casefold() for p in cons['地点']}
+    rate = cons['制作参数']
+    cap = cons['同框上限']
+    scenes, meta = parse(a.file, a.lang)
+    lang = meta['lang']
+    unit = '词' if lang == 'en' else '字'
+    per_sec = rate.get('wps' if lang == 'en' else 'cps')
+    for sc in scenes:
+        table = speaker_table(sc['lines'], names, lang)
+        on = [d['name'] for d in table if not d['offscreen']]
+        off = [d['name'] for d in table if d['offscreen']]
+        size = sum(size_of(x['text'], lang) for x in sc['lines'])
+        dur = f"台词约 {round(size / per_sec, 1)} s" if per_sec else f"台词 {size} {unit}（约束文件没有制作参数，不估秒）"
+        who = f"说话人 {len(table)}（画内 {len(on)}：{'、'.join(on) or '无'}" + (f"；画外 {len(off)}：{'、'.join(off)}" if off else '') + '）'
+        print(f"  场「{sc['title']}」：{who} · {dur}")
+        seen = [n for n in cons['人物'] if any(name_pattern(n).search(t) for _, t in sc['action'])]
+        if seen:
+            print(f"    动作描写提到的已登记人物：{'、'.join(seen)}（谁在场、谁同框以正文为准）")
+        if len(on) > cap:
+            print(f"    ⚠ 画内说话人 {len(on)} 人，超过同框上限 {cap} 人；同框人数要看动作描写（在场无台词的人也算），分镜层再拆正反打或纵深错落")
+        unknown = [d['name'] for d in table if d['name'].casefold() not in names and d['name'].casefold() not in FORMAT_CUES]
         if unknown:
             print(f"    ⚠ 约束文件未登记的说话人：{unknown}（新增人物需先录入台账，并确认有参考图）")
-    # 正文里出现的大写人名（非句首）
-    caps = set(re.findall(r'(?<![.!?]\s)(?<!^)\b([A-Z][a-z]{2,})\b', text, re.M))
-    cand = sorted(c for c in caps if c.lower() not in known and c not in {'The', 'And', 'But', 'Okay', 'Yeah', 'Hey', 'Rhett', 'Theo'} and c.lower() not in {w.lower() for w in cons['地点']})
+    cand = caps_candidates(body, set(names), places)
     if cand:
         print('  正文中的其他大写词（核对是否有未经确认的人名 / 地名 / 品牌）：' + ', '.join(cand[:40]))
     print('说明：脚本只报线索；人物是否出场、台词是否保留，以台账和编剧判断为准。')
