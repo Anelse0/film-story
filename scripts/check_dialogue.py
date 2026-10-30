@@ -16,7 +16,7 @@
 括号行 （…）/(…) 视为括注。角色名或括注里有 电话里 / 手机里 / 画外 / 旁白 / V.O. / O.S. 等的，算画外说话人。
 
 语言（--lang）：auto（默认：按全文多数台词的语言定，另一种算对照翻译）/ en / zh。中文统计句数、字数、问句、接话链
-（只按问号）和解释 / 复述 / 泛称开头 / "不是……而是……"四类词面线索；"与上一句实词重合"要分词，中文不支持，输出里写明。
+（只按问号）和解释 / 复述 / 泛称开头 / "不是……而是……"四类词面线索，加等长对仗 / 排比、接住上一句的词反问两类结构线索（中英文都给）；"与上一句实词重合"要分词，中文不支持，输出里写明。
 
 时长：语速和单条生成上限读项目约束文件的"## 制作参数"（--constraints 指定，或从场景文件往上找 story/constraints.md），
 --wps / --cps 临时指定；都没有就只报词数 / 字数，不估秒，不提拆条。估的是口播时长，不是成片时长。
@@ -37,6 +37,10 @@ THRESH = {
     'echo_overlap': 0.5,      # 与上一句实词重合 ≥50%（只算英文）
     'question_share': 0.5,    # 某人问句占其台词 ≥50%……
     'question_min': 3,        # ……且至少 3 句 → 提示"一直在问"
+    'parallel_min_en': 3,     # 等长对仗：两个相邻分句词数相等且 ≥3（英文）
+    'parallel_min_zh': 4,     # 等长对仗：两个相邻分句字数相等且 ≥4（中文）
+    'pickup_max_en': 5,       # 接住上一句的词反问：问句 ≤5 词（英文）
+    'pickup_max_zh': 8,       # 接住上一句的词反问：问句 ≤8 字（中文）
 }
 
 START = re.compile(r'<!--\s*script-body:start\s*-->')
@@ -70,19 +74,25 @@ EXPLAIN = re.compile(r"\b(because|the reason|i mean|what i'm saying|what i meant
 RECAP = re.compile(r"\b(you said|i said|you told|i told|last night you|remember when|like you said|"
                    r"you (just|already) (said|did|told)|in front of (all of )?them|up there i)\b", re.I)
 APHORISM = re.compile(r"^(people|everyone|everybody|nobody|sometimes|that's (what|how|why)|it's not about|"
-                      r"there are two kinds|the thing about|you can't|you don't get to|that's the)\b", re.I)
+                      r"there are two kinds|the thing about|you can't|you don't get to|that's the|here's the thing|"
+                      r"the thing is|at the end of the day)\b", re.I)
 ANTITHESIS = [re.compile(p, re.I) for p in (
     r"\bnot\b[^.?!]{1,40}\bbut\b", r",\s*not\b", r"\bit's not\b[^.?!]{1,40}\.\s*it's\b",
     r"\bthat's not\b[^.?!]{1,40}\.\s*that's\b", r"\bnever\b[^.?!]{1,30}\balways\b", r"\balways\b[^.?!]{1,30}\bnever\b")]
 EXPLAIN_ZH = re.compile(r"因为|所以说|我的意思是|我想说的是|说白了|说实话|老实说|你要明白|你得明白|你要知道")
 RECAP_ZH = re.compile(r"你刚才说|你刚刚说|你说过|我说过|你不是说|上次你|那天你|你还记得")
-APHORISM_ZH = re.compile(r"^(人啊|人这一辈子|有些人|有的人|这世上|生活就是|爱就是|所谓|说到底)")
+APHORISM_ZH = re.compile(r"^(人啊|人这一辈子|有些人|有的人|这世上|生活就是|爱就是|所谓|说到底|每个人都|没有人会|有时候|这就是|这才是|真正的|重要的是)")
 ANTITHESIS_ZH = [re.compile(p) for p in (r"不是[^，。！？]{1,20}[，,]?\s*而是", r"与其[^，。！？]{1,20}不如")]
 EMO_PAREN = re.compile(r"(?<!压)低声|[，,]\s*平[）)]|平静|冷冷|冷淡|讽刺|深情|愤怒|悲伤|激动|温柔|坚定|quietly|coldly|softly|sarcastic|"
                        r"angrily|bitterly|tenderly|firmly|calmly", re.I)
 HEADER_WORDS = {'承接', '后续', '版本', '状态', '依据', '位置', '标题', '场序', '人物', '服装说明', '声音', '气场', '设计取向', '主线', '说明', '来源', '注', '新事实', '新事实（提案）', '本场改变了什么', '改动清单', '连带影响', '本版改动', '本轮目标', '改', '删', '加', '备选', '批注', '上一版'}
 TAG = {'explain': '含解释性词语', 'recap': '含复述性词语', 'aphorism': '泛称 / 格言式开头',
-       'antithesis': '反转句式', 'echo': '与上一句实词重合'}
+       'antithesis': '反转句式', 'echo': '与上一句实词重合', 'parallel': '等长对仗 / 排比',
+       'pickup': '接住上一句的词反问'}
+CLAUSE_SPLIT = re.compile(r'[,;:.!?…—–]+|[，。！？；：…—]+')
+ZH_PARTICLE = set('了吗呢吧啊的呀嘛啦哦')
+PICKUP_SKIP_ZH = {'什么', '怎么', '为何', '是吗', '真的', '然后', '你们', '我们', '他们', '不是', '可以'}
+QUOTED_WORD = re.compile(r"[‘'\"“]([A-Za-z]+)[’'\"”]")
 LANG_NAME = {'en': '英文', 'zh': '中文'}
 UNIT = {'en': '词', 'zh': '字'}
 
@@ -293,6 +303,55 @@ def content_words(t):
     return [w.lower() for w in WORD.findall(t) if w.lower() not in STOP]
 
 
+def clauses(t, lang):
+    """按标点切分句，返回每个分句的词（英文）或字（中文）列表。"""
+    out = []
+    for part in CLAUSE_SPLIT.split(t):
+        toks = [w.lower() for w in WORD.findall(part)] if lang == 'en' else CJK.findall(part)
+        if toks:
+            out.append(toks)
+    return out
+
+
+def parallel_tag(t, lang):
+    """等长对仗 / 排比的表面线索：三个相邻分句同一开头；或两个相邻分句等长且同位置有相同的实词（中文不算语气助词）。"""
+    cl = clauses(t, lang)
+    if len(cl) < 2:
+        return None
+    skip = STOP if lang == 'en' else ZH_PARTICLE
+    for i in range(len(cl) - 2):
+        a, b, c = cl[i:i + 3]
+        if all(len(x) >= 2 for x in (a, b, c)) and a[0] == b[0] == c[0]:
+            # 口语里 "and … and … and …" / "我……我……我……" 很常见：英文开头是虚词、中文一律，要前两个词（字）都相同才算排比
+            if (lang == 'en' and a[0] not in skip) or (a[1] == b[1] == c[1]):
+                return TAG['parallel']
+    mn = THRESH['parallel_min_en'] if lang == 'en' else THRESH['parallel_min_zh']
+    for a, b in zip(cl, cl[1:]):
+        if len(a) == len(b) >= mn:
+            if any(x == y and x not in skip for x, y in zip(a, b)) or (lang == 'en' and a[0] == b[0] and a[-1] == b[-1]):
+                return TAG['parallel']
+    return None
+
+
+def pickup_tag(cur, prev, lang):
+    """接住上一句的词反问：换人后的一个短问句，里面有上一句的词（英文含引号里的词；中文按两字片段）。复述确认也会被标，是否算问题看处境。"""
+    if not is_question(cur):
+        return None
+    if lang == 'en':
+        toks = [w.lower() for w in WORD.findall(cur)]
+        if not toks or len(toks) > THRESH['pickup_max_en']:
+            return None
+        prev_toks = {w.lower() for w in WORD.findall(prev)}
+        quoted = {w.lower() for w in QUOTED_WORD.findall(cur)}
+        return TAG['pickup'] if (set(content_words(cur)) | quoted) & prev_toks else None
+    chars = CJK.findall(cur)
+    if not chars or len(chars) > THRESH['pickup_max_zh']:
+        return None
+    s, p = ''.join(chars), ''.join(CJK.findall(prev))
+    grams = {s[i:i + 2] for i in range(len(s) - 1)} - PICKUP_SKIP_ZH
+    return TAG['pickup'] if any(g in p for g in grams) else None
+
+
 def speaker_table(lines, names=None, lang='en'):
     """按说话人汇总（不分大小写）；names 是约束文件登记的人名，用来显示规范写法。"""
     names = names or {}
@@ -367,6 +426,11 @@ def analyse(scene, lang='en', rates=None, names=None):
             if RECAP_ZH.search(t): tags.append(TAG['recap'])
             if APHORISM_ZH.search(t.strip()): tags.append(TAG['aphorism'])
             if any(p.search(t) for p in ANTITHESIS_ZH): tags.append(TAG['antithesis'])
+        ptag = parallel_tag(t, lang)
+        if ptag:
+            tags.append(ptag)
+        if k and x['speaker'].casefold() != L[k - 1]['speaker'].casefold() and pickup_tag(t, L[k - 1]['text'], lang):
+            tags.append(TAG['pickup'])
         if tags:
             name = (names or {}).get(x['speaker'].casefold(), x['speaker'])
             out['marked_lines'].append({'line': x['raw_no'], 'speaker': name, 'text': t, 'tags': tags})

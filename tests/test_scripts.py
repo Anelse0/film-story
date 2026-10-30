@@ -144,6 +144,38 @@ class Labels(Base):
         self.assertIn('Theo', cd.analyse(sc, names={'theo': 'Theo'})['speakers'])
 
 
+class Patterns(Base):
+    def _tags(self, name):
+        scenes, meta = cd.parse(self.fx / name)
+        r = cd.analyse(scenes[0], meta['lang'])
+        return {m['text']: m['tags'] for m in r['marked_lines']}
+
+    def test_en_parallel_and_pickup(self):
+        tags = self._tags('patterns.md')
+        self.assertIn(cd.TAG['pickup'], tags["Who's 'we'?"])
+        self.assertIn(cd.TAG['parallel'], tags['He wants the credit, she wants the control.'])
+        self.assertIn(cd.TAG['parallel'], tags['Not the money. Not the fame. Not the work.'])
+        self.assertNotIn("Okay. I'll bring the van.", tags)
+        self.assertNotIn('We leave at nine.', tags)
+        self.assertNotIn("And then I did the closet, and then it's five, and I've got a call at seven.", tags)
+        self.assertIn(cd.TAG['parallel'], tags["You don't call. You don't text. You don't show."])
+
+    def test_zh_parallel_and_pickup(self):
+        tags = self._tags('patterns-zh.md')
+        self.assertIn(cd.TAG['pickup'], tags['大家是谁？'])
+        self.assertIn(cd.TAG['parallel'], tags['他要的是面子，我要的是日子。'])
+        self.assertNotIn('我回来了，你吃饭了？', tags)
+        self.assertNotIn('饭在锅里。', tags)
+        self.assertNotIn('我去了，我等了，我走了。', tags)
+        self.assertIn(cd.TAG['parallel'], tags['不是钱，不是名，不是脸。'])
+
+    def test_cue_wording_is_surface(self):
+        out = self.run_script('check_dialogue.py', self.fx / 'patterns.md')
+        self.assertIn('等长对仗 / 排比', out)
+        self.assertIn('接住上一句的词反问', out)
+        self.assertIn('需人工判断', out)
+
+
 class Constraints(Base):
     def test_forbidden_word_outside_body_ignored(self):
         out = self.run_script('check_constraints.py', self.fx / 'body-annotations.md', '--constraints', self.cons)

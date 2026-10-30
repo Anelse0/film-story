@@ -2,7 +2,7 @@
 
 方法文件（`scene-work.md`、`dialogue.md`、`story-development.md`、`dialogue-patterns.md`）只写案例短名，背景、链接与定位都在这里，不在各文件里重复。只转述，不复制剧本原文；公开引用原话之前要对原页。
 
-来源：《film-story 0.6.0 专业创作实务调研与升级方案》（2026-10-24，作者本地，不随仓库分发；基线为本仓库 0.5.0）。同日审阅抽查了其中 10 条访谈与方法出处，依据是网页摘要与短摘录。
+来源：《film-story 0.6.0 专业创作实务调研与升级方案》（2026-10-24，作者本地，不随仓库分发；基线为本仓库 0.5.0）。同日审阅抽查了其中 10 条访谈与方法出处，依据是网页摘要与短摘录。0.8.0 的"故事框架""戏化""对白生成""题材手册"四节来源于《0.8.0 故事框架与对白生成：调研与方案》（2026-10-30，作者本地），复核状态逐条写在各条目里；标"链接待补"的见文末清单。
 
 **证据类型**：创作者回忆（访谈、讲座、注释，属本人对过程的回顾）/ 稿件对照（公开的前后稿可以互相比对）/ 本 skill 的稿面分析（对公开稿件的解读，不是作者说明的动机）/ 产品文档。
 
@@ -154,6 +154,152 @@
 - 用在：`dialogue.md` §7；`dialogue-patterns.md`"不要误删的写法"
 - 复核：Time Out 核实；LOC 沿用
 
+## 故事框架（0.8.0 迭代 1 新增）
+
+### Craig Mazin《How to Write a Movie》
+- 出处：Scriptnotes 403 文字稿（2019-06-13）— https://johnaugust.com/2019/scriptnotes-ep-403-how-to-write-a-movie-transcript
+- 类型：创作者方法说明
+- 支持：主题是"中心戏剧论点"，必须可争论；主角开场按反论点活在"可接受的不完美"的稳态里；中点是第一次按论点行动、随即被惩罚；首尾两场只差主角按哪个信念行动；"结构不是工具，是症状"；场是正题 → 反题 → 合题，变化有内在 / 人际 / 外部三轴。
+- 不支持：把他的十二步当模板填；他讲的是长片，剧集按季借用。
+- 用在：`story-framework.md` §3；0.8.0 迭代 2 的三轴
+- 复核：核实（10-30 读了文字稿）
+
+### Breaking Bad 编剧室
+- 出处：George Mastras 等访谈，The Writer — https://www.writermag.com/?p=3188 ；Vince Gilligan，Television Academy Foundation 访谈 — https://EmmyTVLegends.org/interviews/vince-gilligan ；Peter Gould，Scriptnotes 168（作者本地 `02` 已核对 "keep turning cards over"）
+- 类型：创作者回忆
+- 支持：每季从"人物现在在哪"问起（"Where's Skyler at?"）；每拍问"刚刚发生了什么 → 结果会是什么"；卡片上软木板，一集约十天；可以从一个怪图像倒推，但必须由主角的行为启动。
+- 不支持："从季终倒着写"——没有找到这样的说法。
+- 用在：`story-framework.md` §2、§4
+- 复核：二手（搜索摘要）；Gould、Gilligan 的两句为作者本地已核
+
+### Succession（Jesse Armstrong）
+- 出处：WGA East《OnWriting》第 107 集文字稿 — https://wgaeast.org/?p=25693 ；NPR Fresh Air 2023-06-05
+- 类型：创作者回忆
+- 支持：写试播时只知道"调性上的终点"；每一场戏里要真的相信 Kendall 能赢，剧作真相留在季的层面；人物"很少变、很慢、不一定朝一个方向"。
+- 不支持：把"不知道结局"当成不定季终落点的理由——他定了调性终点。
+- 用在：`story-framework.md` §2
+- 复核：沿用（作者本地 `02` 回原文核对过 "hide from yourself… some essential truth"）
+
+### Hacks（Aniello、Downs、Statsky）
+- 出处：The Hollywood Reporter 2024 编剧访谈 — https://www.hollywoodreporter.com/tv/tv-features/hacks-writers-interview-season-3-1235972614/ ；The Playlist 第三季终集访谈 — https://theplaylist.net/?p=463547
+- 类型：创作者回忆
+- 支持：季末"Ava 必须从 Deborah 手里拿走位置"定得很早，"敲诈什么"拆季时才想出来；第三季"每一集都是目标在这、我怎么拿到"，拆完发现关系没有推进的位置，补了一集（"One Day"）；两人台词"rude, but never mean"。
+- 不支持：补一集是通例——它是对"季太目标化"的修正。
+- 用在：`story-framework.md` §1、§2、§4
+- 复核：沿用（作者本地 `02` 核对过 "rude, but never mean"；"One Day" 补集一条按作者本地笔记，本次未重读原页）
+
+### 美国电视编剧室的文件链
+- 出处：scriptmag《Writers' Room 101: Writing The Outline》— https://scriptmag.com/features/writers-room-101-writing-outline ；filmdaft 编剧室术语表 — https://filmdaft.com/tv-writing-glossary-essential-writers-room-terms-explained/ ；industrialscripts《What are A, B and C Plots》— https://industrialscripts.com/?p=238092
+- 类型：行业写作指南（二手）
+- 支持：故事区域 → 节拍单 → 大纲 → 编剧稿 → 制作稿；一小时剧 teaser + 四到五幕；A / B / C 线与跑线。
+- 不支持：页数、幕数是固定规范——各剧不同，流媒体剧常无幕间。
+- 用在：`story-framework.md` 的 A / B 线、跑线；`glossary.md`
+- 复核：二手
+
+## 戏化（0.8.0 迭代 2 新增）
+
+### David Mamet 致《The Unit》编剧的备忘录
+- 出处：2005-10-19 备忘录，转载：Slashfilm — https://www.slashfilm.com/a-letter-from-david-mamet-to-the-writers-of-the-unit/ ；No Film School — https://nofilmschool.com/2010/10/david-mamet-drama-a-memo-the-unit-writers
+- 类型：创作者备忘录（转载）
+- 支持：每场的三问——谁要什么、得不到会怎样、为什么是现在；答案是试纸；观众不为信息收看，一个人向另一个人解释的场没有戏。
+- 不支持：把三问写进台词；他的全大写口吻与绝对化表述不照搬。
+- 用在：`dramatization.md` §2
+- 复核：未复核（10-30 三次抓取超时；多家转载文字一致，引用原话前要对原页）
+
+### Aaron Sorkin：意图与障碍
+- 出处：MasterClass 文章 — https://www.masterclass.com/articles/8-tips-for-aspiring-screenwriters-from-aaron-sorkin ；Time Out 访谈（见"社交网络"条）
+- 类型：创作者说明（二手转述）
+- 支持：有人要什么、有东西挡着，是一切戏的底；最常见的问题是不信那个意图或不信那个障碍。
+- 不支持：具体措辞——各家转述不一。
+- 用在：`dramatization.md` §2
+- 复核：二手
+
+### Robert McKee：场要转向
+- 出处：《Do Your Scenes Turn?》— https://mckeestory.com/do-your-scenes-turn/ ；《Story》场景分析一章（Casablanca 一场）
+- 类型：方法说明
+- 支持：场 = 通过冲突让一个价值从正到负或从负到正；分析五步（定冲突、开场值、拆拍、结束值、找转折拍）；没转向的不是场。
+- 不支持：每场必须有大反转；安静的场被一概删掉。
+- 用在：`dramatization.md` §4
+- 复核：二手（博文与课程讲义，未读原书对应页）
+
+### Hitchcock：悬念与惊讶
+- 出处：Truffaut 访谈中"桌下的炸弹"一段，No Film School 转述 — https://nofilmschool.com/alfred-hitchcock-and-francois-truffaut-explain-surprise-vs-suspense ；David Bordwell 的解读 — https://www.davidbordwell.net/blog/2013/11/
+- 类型：创作者访谈（转述）+ 学者解读
+- 支持：观众比人物多知道产生悬念；信息顺序决定张力。
+- 不支持：原话措辞——各版本转述不同。
+- 用在：`dramatization.md` §3（观众知情）；`story-development.md` §4 已有同义条目
+- 复核：二手
+
+### 断背山（McMurtry、Ossana）
+- 出处：NPR All Things Considered 2005-12-09；Cinemalogue 2006-02-14 问答（作者本地 `02` 读过原文；链接待补）
+- 类型：创作者回忆
+- 支持：导演担心 Alma 看见两人接吻"太强"，编剧坚持"Alma 必须看见，否则她怎么知道"——谁必须看见由信息分布决定，不由台词补。
+- 不支持：导演的结构改动一律不接受——拆场的改动他们接受了。
+- 用在：`dramatization.md` §3
+- 复核：沿用（作者本地已核，本次未重读）
+
+## 对白生成（0.8.0 迭代 3 新增）
+
+### Elmore Leonard 的十条
+- 出处：The Wrap 转载 — https://thewrap.com/elmore-leonards-10-rules-writing-111911 ；Christian Science Monitor — https://www.csmonitor.com/Books/2008/0115/p16s01-bogn.html
+- 类型：作者自述（多处转载一致）
+- 支持："If it sounds like writing, I rewrite it"；删掉读者会跳过的部分；对白标签只用 said。
+- 不支持：他写的是小说，标签一条不适用于剧本。
+- 用在：`dialogue.md` §9
+- 复核：核实（多处一致）
+
+### 会话分析：偏好组织与不情愿的回应
+- 出处：相邻对与偏好组织的经典描述见 Schegloff、Levinson（《Pragmatics》第 6 章）；对电影对白的应用研究一例 — https://ejournal.unp.ac.id/index.php/humanus/article/view/8050/pdf
+- 类型：语言学研究（二手摘要）
+- 支持：成对的话轮里，不被期待的回应（拒绝、不同意）通常延迟、间接、更长、带理由；提问可以设计得让对方容易拒绝。
+- 不支持：把它当对白公式——它描述的是倾向，人物可以违反它，违反本身就是信息。
+- 用在：`dialogue.md` §8
+- 复核：二手（摘要一致；未读原书）
+
+### Normal People（Rooney、Birch）、Call Me by Your Name（Ivory）、Before Sunrise（Krizan）
+- 出处：BBC Writersroom《Normal People》第 1 集拍摄稿；Sally Rooney，THR 2020-04-29；James Ivory，Guardian 2018 与 MPA The Credits 2018；Kim Krizan，Yale Herald——作者本地 `02_一手案例分析.md` 读过原文（链接待补）
+- 类型：剧本稿面 + 创作者回忆
+- 支持：回应落在动作、延迟、第三人（"I like you." 之后转身要走、再被一句球赛的话拉回）；最脆弱的人先开口；借别人的故事、借一个游戏说真话。
+- 不支持：以上是对公开稿的分析，不是作者说明的写作程序。
+- 用在：`dialogue.md` §8、§9
+- 复核：沿用（作者本地已核，本次未重读）
+
+### Mamet、Sorkin
+- 见"戏化"一节；`dialogue.md` §2、§9 只借"说话是为了争取"和"意图与障碍"两句。
+
+## 题材手册（0.8.0 迭代 4 新增）
+
+### UCB《Comedy Improvisation Manual》：场景的游戏
+- 出处：Hoopla《A quick guide to Game of the Scene》— https://www.hooplaimpro.com/quick-guide-game-of-scene ；手册目录（图书馆记录）— https://search.schlowlibrary.org/Record/424272/TOC
+- 类型：方法手册（二手摘要）
+- 支持：先立基础现实，找到第一个不寻常的东西，再交替升级与探索；原则是"如果这是真的，还有什么是真的"。
+- 不支持：手册原文措辞——本次只读了摘要与目录。
+- 用在：`genre-playbooks/light-comedy.md` §1、§2
+- 复核：二手
+
+### Brandon Sanderson 的魔法定律
+- 出处：官方 FAQ — https://faq.brandonsanderson.com/knowledge-base/what-are-sandersons-laws-of-magic/ ；Coppermind 词条 — https://coppermind.net/wiki/Sanderson%27s_Laws_of_Magic
+- 类型：作者自述
+- 支持：第一定律——作者能用魔法解决多少冲突，取决于读者对它懂多少；第二定律——限制比能力有趣（他用超人的氪石与道德约束作例）。
+- 不支持：把它当硬性世界观设计规范；他写的是小说。
+- 用在：`genre-playbooks/light-comedy.md` §1
+- 复核：核实（官方 FAQ）
+
+### Friday Night Lights（Jason Katims）
+- 出处：Television Academy 专题 — https://www.televisionacademy.com/features/online-originals/friday-night-lights-jason-katims ；Complex 人物稿（二手）
+- 类型：创作者访谈（二手）
+- 支持：全剧"是关于人物的"；大群像、多线并行；主创自认不是橄榄球迷。
+- 不支持：编剧室怎样结构比赛段落——没有找到说明。
+- 用在：`genre-playbooks/competition-line.md` §1
+- 复核：二手
+
+### Barry（Bill Hader）、听花岛访谈
+- 出处：THR 2023-05-07、Fresh Air 2019（Hader）；新声 Pro 2025-11-27（听花岛四位核心成员）——作者本地 `02` 读过原文（链接待补）
+- 类型：创作者访谈
+- 支持：Hader："直接给人物他想要的，再放进威胁"，不解释他们怎么逃掉；听花岛：一半戏在客厅，用情景喜剧的三面台。
+- 用在：`genre-playbooks/light-comedy.md` §3、§4
+- 复核：沿用（作者本地已核）
+
 ## 方法与播客
 
 ### John August《How to write a scene》
@@ -206,3 +352,19 @@
 | Highland Pro — https://quoteunquoteapps.com/highland-pro/ | 场景导航、Shelf、修订工具 | 正文、备选与研究材料各有位置 |
 | Scriptation — https://help.scriptation.com/en/article/how-do-i-transfer-my-notes-1khpcd8/ | PDF 批注迁移到新稿，提示被改动或删除的关联文本 | 批注块随版本迁移（SKILL.md §4） |
 | Fountain — https://fountain.io/syntax/ | 公开的纯文本剧本格式：场景、人物、对白、双栏对白 | 导出推迟到后续版本（Fountain / FDX / PDF） |
+
+## 待补链接（0.8.0）
+
+下列出处在作者本地案例分析里读过原文、本次未重新打开，条目里标"链接待补"；补上后改状态为"沿用"或"核实"。
+
+| 出处 | 用在 | 要补什么 |
+|---|---|---|
+| Jesse Armstrong，NPR Fresh Air 2023-06-05 | 故事框架 §2 | 文字稿链接 |
+| Hacks 主创：Deadline 2022-06-02、TV Insider 2024-05-31、Sundance Collab 2025-05-29 | 故事框架 §2、题材手册 | 链接与"One Day"补集那段的定位 |
+| 断背山：NPR All Things Considered 2005-12-09；Cinemalogue 2006-02-14 | 戏化 §3 | 链接与"Alma 必须看见"那段的定位 |
+| Normal People：BBC Writersroom 第 1 集拍摄稿；Sally Rooney，THR 2020-04-29 | 对白生成 §8、题材手册 | 链接与页码 |
+| Call Me by Your Name：James Ivory，Guardian 2018、MPA The Credits 2018 | 对白生成 §9 | 链接 |
+| Before Sunrise：Kim Krizan，Yale Herald | 对白生成 §9、题材手册 | 链接 |
+| Barry：Bill Hader，THR 2023-05-07、Fresh Air 2019 | 题材手册（轻喜剧） | 链接 |
+| 听花岛四位核心成员访谈，新声 Pro 2025-11-27 | 题材手册（轻喜剧、竞技线） | 链接 |
+| David Mamet 备忘录原文 | 戏化 §2、对白生成 | 抓取三次超时；对一次原页后把"未复核"改为"核实" |
