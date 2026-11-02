@@ -1,4 +1,4 @@
-"""0.6.0 检查脚本回归：正文边界、台词块、语言、画内 / 画外、制作参数、表面线索的命名、约束检查只查正文。
+"""检查脚本回归（0.6.0 起；0.10.0 加总表夹具）：正文边界、台词块、语言、画内 / 画外、制作参数、表面线索的命名、约束检查只查正文。
 夹具在 tests/fixtures/；每个用例先把夹具复制到临时目录，免得往上找到真实项目的 story/constraints.md。"""
 import shutil
 import subprocess
@@ -199,6 +199,49 @@ class Constraints(Base):
         c.write_text('## 人物\n- Jo\n', encoding='utf-8')
         out = self.run_script('check_constraints.py', self.fx / 'no-markers.md', '--constraints', c)
         self.assertIn("未登记的说话人：['THEO', 'RHETT']", out)
+
+
+class OneDoc(Base):
+    """0.10.0：制作参数从总表第 5 节读（## 或 ### 标题、可带编号）；story/constraints.md 仍优先。"""
+
+    def setUp(self):
+        super().setUp()
+        self.one = self.fx / 'project-onedoc'
+        self.doc = self.one / 'story' / 'show.md'
+        self.scene = self.one / 'ep01' / '03_script' / 's01.md'
+
+    def test_discovery_falls_back_to_project_doc(self):
+        from project_config import find_constraints
+        self.assertEqual(find_constraints(self.scene).resolve(), self.doc.resolve())
+
+    def test_old_constraints_file_still_preferred(self):
+        from project_config import find_constraints
+        found = find_constraints(self.fx / 'project' / 'ep01' / '03_script' / 's01-long.md')
+        self.assertTrue(str(found).endswith('constraints.md'))
+
+    def test_numbered_and_level3_headings_parse(self):
+        cons = load_constraints(self.doc)
+        self.assertEqual(cons['人物'], ['Theo', 'Rhett'])
+        self.assertEqual(cons['地点'], {'lot'})
+        self.assertEqual(cons['禁用'], ['kiss'])
+        self.assertEqual(cons['必填头部'], ['版本：', '承接：', '本场改变了什么：'])
+        self.assertEqual(cons['同框上限'], 2)
+        self.assertEqual(cons['制作参数'], {'wps': 4.0, 'clip_max': 10.0})
+
+    def test_character_bios_are_not_registered_names(self):
+        cons = load_constraints(self.doc)
+        self.assertNotIn('Evelyn', cons['人物'])
+        self.assertNotIn('Hollis', cons['人物'])
+        self.assertFalse(any('要什么' in n or '计划' in n for n in cons['人物']))
+
+    def test_three_line_header_and_seconds_from_project_doc(self):
+        out = self.run_script('check_constraints.py', self.scene)
+        self.assertIn('头部必填项：齐', out)
+        self.assertIn('台词约', out)
+        self.assertNotIn('未登记的说话人', out)
+        meta, rs = cd.report(self.scene)
+        self.assertTrue(meta['config'].endswith('show.md'))
+        self.assertEqual(rs[0]['est_seconds'], round(rs[0]['total_size'] / 4, 1))
 
 
 if __name__ == '__main__':

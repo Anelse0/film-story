@@ -18,7 +18,7 @@
 语言（--lang）：auto（默认：按全文多数台词的语言定，另一种算对照翻译）/ en / zh。中文统计句数、字数、问句、接话链
 （只按问号）和解释 / 复述 / 泛称开头 / "不是……而是……"四类词面线索，加等长对仗 / 排比、接住上一句的词反问两类结构线索（中英文都给）；"与上一句实词重合"要分词，中文不支持，输出里写明。
 
-时长：语速和单条生成上限读项目约束文件的"## 制作参数"（--constraints 指定，或从场景文件往上找 story/constraints.md），
+时长：语速和单条生成上限读项目约束文件的"## 制作参数"（--constraints 指定，或从场景文件往上找 story/constraints.md、再找 story/ 下带"制作参数"标题的总表），
 --wps / --cps 临时指定；都没有就只报词数 / 字数，不估秒，不提拆条。估的是口播时长，不是成片时长。
 
 输出每场：句数、说话人分布（画外单独标出）、词数或字数、连续接话、短句占比、问句过半的说话人、词面线索、括号里的
@@ -353,7 +353,7 @@ def pickup_tag(cur, prev, lang):
 
 
 def speaker_table(lines, names=None, lang='en'):
-    """按说话人汇总（不分大小写）；names 是约束文件登记的人名，用来显示规范写法。"""
+    """按说话人汇总（不分大小写）；names 是总表第 5 节登记的人名，用来显示规范写法。"""
     names = names or {}
     spk = {}
     for x in lines:
@@ -451,7 +451,7 @@ def project_settings(path, constraints=None, wps=None, cps=None):
     if constraints:
         cfg = Path(constraints)
         if not cfg.is_file():
-            cfg, warn = None, f'约束文件不存在：{constraints}'
+            cfg, warn = None, f'总表 / 约束文件不存在：{constraints}'
     else:
         cfg = find_constraints(path)
     rates, names = {}, {}
@@ -500,7 +500,7 @@ def describe(meta):
     elif meta['config']:
         cfg = f"{_rel(meta['config'])}（没有制作参数，不估算时长）"
     else:
-        cfg = '未找到 story/constraints.md，不估算时长（可用 --wps / --cps 临时指定）'
+        cfg = '未找到 story/constraints.md 或带制作参数的总表，不估算时长（可用 --wps / --cps 临时指定）'
     out = f"  正文：{body} · 语言：{lang} · 配置：{cfg}"
     if meta['warn']:
         out += f"\n  ⚠ {meta['warn']}"
@@ -511,7 +511,7 @@ def main():
     ap = argparse.ArgumentParser(description='对白检查（film-story）：只给词面与结构线索，不打分。')
     ap.add_argument('files', nargs='+')
     ap.add_argument('--lang', choices=('auto', 'en', 'zh'), default='auto', help='台词语言；默认按全文多数台词判断')
-    ap.add_argument('--constraints', help='项目约束文件；不给时从场景文件往上找 story/constraints.md')
+    ap.add_argument('--constraints', help='总表或旧约束文件；不给时从场景文件往上找 story/constraints.md，再找带制作参数的总表')
     ap.add_argument('--wps', type=float, help='英文语速（词/秒），临时覆盖配置')
     ap.add_argument('--cps', type=float, help='中文语速（字/秒），临时覆盖配置')
     ap.add_argument('--json', action='store_true')
@@ -551,7 +551,7 @@ def main():
         if meta['other_lang_speeches'] and any(r['n_lines'] for r in results):
             o = 'zh' if meta['lang'] == 'en' else 'en'
             print(f"  另有 {meta['other_lang_speeches']} 段只有{LANG_NAME[o]}的台词未计入")
-    print('\n说明：以上是词面和结构线索，不是判断；阈值是通用默认。是否算问题，先对照本剧规则表（story/rules.md）和本场处境；'
+    print('\n说明：以上是词面和结构线索，不是判断；阈值是通用默认。是否算问题，先对照总表第 1 节"这部剧怎么写"和本场处境；'
           '判断标准是这句是否为该人物在当下处境中会对对方说的话。')
 
 

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""约束检查（film-story）。把场景稿和项目约束文件对一遍，报：
+"""约束检查（film-story）。把场景稿和总表第 5 节（或旧的 story/constraints.md）对一遍，报：
   - 场景头部必填项有没有（只查正文标记之前）
   - 禁用词（只查正文；本版改动、批注里引用的旧句不算）
   - 每场说话人，画内 / 画外分开；画内说话人超过同框上限时提示（同框人数看动作描写，脚本不推算）
   - 动作描写里提到的已登记人物（核对谁在场）
   - 稿里出现、约束里没登记的说话人（可能是擅自新增人物）
   - 正文中的其他大写词（核对是否有未经确认的人名 / 地名 / 品牌）
-  - 每场台词时长估算（约束文件有"制作参数"时）
+  - 每场台词时长估算（配了"制作参数"时）
 
 用法: python3 check_constraints.py scene.md [--constraints <项目>/story/constraints.md] [--lang auto|en|zh]
-不给 --constraints 时从场景文件往上找 story/constraints.md。约束文件格式见 templates/constraints.md。
+不给 --constraints 时从场景文件往上找 story/constraints.md，没有就找 story/ 下带"制作参数"标题的总表。格式见 templates/project.md 第 5 节。
 退出码恒为 0，不替人判。"""
 import argparse, re, sys
 from pathlib import Path
@@ -46,12 +46,12 @@ def name_pattern(n):
 def main():
     ap = argparse.ArgumentParser(description='约束检查（film-story）：只报线索，不替人判。')
     ap.add_argument('file')
-    ap.add_argument('--constraints', help='项目约束文件；不给时从场景文件往上找 story/constraints.md')
+    ap.add_argument('--constraints', help='总表或旧约束文件；不给时从场景文件往上找 story/constraints.md，再找带制作参数的总表')
     ap.add_argument('--lang', choices=('auto', 'en', 'zh'), default='auto')
     a = ap.parse_args()
     cfg = Path(a.constraints) if a.constraints else find_constraints(a.file)
     if not cfg or not cfg.is_file():
-        print(f"== {a.file} ==\n  ⚠ 没有约束文件（{a.constraints or '往上没找到 story/constraints.md'}）；先按 templates/constraints.md 建一份")
+        print(f"== {a.file} ==\n  ⚠ 没有制作参数（{a.constraints or '往上没找到 story/constraints.md，也没有带制作参数标题的总表'}）；先填总表第 5 节（templates/project.md）")
         return
     cons = load_constraints(cfg)
     src = Path(a.file).read_text(encoding='utf-8').splitlines()
@@ -84,7 +84,7 @@ def main():
         on = [d['name'] for d in table if not d['offscreen']]
         off = [d['name'] for d in table if d['offscreen']]
         size = sum(size_of(x['text'], lang) for x in sc['lines'])
-        dur = f"台词约 {round(size / per_sec, 1)} s" if per_sec else f"台词 {size} {unit}（约束文件没有制作参数，不估秒）"
+        dur = f"台词约 {round(size / per_sec, 1)} s" if per_sec else f"台词 {size} {unit}（没配制作参数，不估秒）"
         who = f"说话人 {len(table)}（画内 {len(on)}：{'、'.join(on) or '无'}" + (f"；画外 {len(off)}：{'、'.join(off)}" if off else '') + '）'
         print(f"  场「{sc['title']}」：{who} · {dur}")
         seen = [n for n in cons['人物'] if any(name_pattern(n).search(t) for _, t in sc['action'])]
@@ -94,11 +94,11 @@ def main():
             print(f"    ⚠ 画内说话人 {len(on)} 人，超过同框上限 {cap} 人；同框人数要看动作描写（在场无台词的人也算），分镜层再拆正反打或纵深错落")
         unknown = [d['name'] for d in table if d['name'].casefold() not in names and d['name'].casefold() not in FORMAT_CUES]
         if unknown:
-            print(f"    ⚠ 约束文件未登记的说话人：{unknown}（新增人物需先录入台账，并确认有参考图）")
+            print(f"    ⚠ 未登记的说话人：{unknown}（新增人物先录入总表第 5 节，并确认有参考图）")
     cand = caps_candidates(body, set(names), places)
     if cand:
         print('  正文中的其他大写词（核对是否有未经确认的人名 / 地名 / 品牌）：' + ', '.join(cand[:40]))
-    print('说明：脚本只报线索；人物是否出场、台词是否保留，以台账和编剧判断为准。')
+    print('说明：脚本只报线索；人物是否出场、台词是否保留，以总表和编剧判断为准。')
 
 
 if __name__ == '__main__':
