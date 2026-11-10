@@ -17,14 +17,14 @@ Pull back: two stools, one of them empty.
 The note on the fridge reads: "BACK AT TEN."
 
 **DEV**
-You're really good at this.
-你真的很会这个。
+You kept the old sign.
+你还留着旧招牌。
 
 Mara doesn't look up from the shaker.
 
 **MARA**
-I know.
-我知道。
+Still works.
+还能用。
 
 ### AT THE WINDOW
 
@@ -42,5 +42,5 @@ CUT TO:
 <!-- script-body:end -->
 
 ### 场 01 v1 · 批注（2026-11-09）
-> I know.
+> Still works.
 - 判断一句（依据：通用默认）。

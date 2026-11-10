@@ -1,6 +1,6 @@
 # 正式剧本：标准格式与写法
 
-用法：第 4 步写剧本正文、第 5 步改正文时读。头部字段见 `templates/screenplay.md`；大纲和剧本各管什么见 SKILL.md §2。格式的公开出处见 `sources.md`"工具"。
+用法：第 4 步写剧本正文、第 5 步改正文时读。头部字段见 `templates/screenplay.md`；四个阶段各管什么见 SKILL.md §2。格式的公开出处见 `sources.md`"工具"。
 
 剧本一集一个文件，是 Markdown；元素是行业标准剧本的那几种。标准页（Courier 12 pt、固定页边距）由脚本从 Markdown 导出，不手排。
 
@@ -9,7 +9,7 @@
 | 元素 | Markdown 里怎么写 | 写什么 | 标准页上的位置 |
 |---|---|---|---|
 | 场标记 | 注释行，写在这一场第一个场景标题的上一行：`<!-- S03 · THE BAR -->` | 场号和名字，同节拍单；一场可以有几个场景标题 | 不显示 |
-| 场景标题（Scene Heading / Slugline） | 二级标题：`## INT. KITCHEN - NIGHT` | `INT.` 或 `EXT.` + 地点 + ` - ` + 时间（DAY / NIGHT / LATER / CONTINUOUS），全大写；地点用约束文件登记的名字 | 顶格 |
+| 场景标题（Scene Heading / Slugline） | 二级标题：`## INT. KITCHEN - NIGHT`；有正文标记的文件里，二级标题都算场景标题 | `INT.` 或 `EXT.` + 地点 + ` - ` + 时间（DAY / NIGHT / LATER / CONTINUOUS），全大写；地点用约束文件登记的名字 | 顶格 |
 | 场内小标题 | 三级标题：`### AT THE WINDOW` | 同一场里换到另一处，时间不断 | 顶格 |
 | 动作描写（Action） | 普通段落，段间空一行 | 观众看得见、听得见的，现在时；一段一个画面 | 顶格，通栏 60 格 |
 | 角色名（Character） | 加粗单独一行：`**MARA**`；下一行紧跟台词，中间不空行 | 全大写。画外的声音写 `**MARA (V.O.)**`，人在场但不在画内写 `(O.S.)`，隔了动作接着说写 `(CONT'D)` | 缩进 20 格 |
@@ -71,7 +71,7 @@ The till drawer shuts.
 - 对白用剧的语言。要对照翻译时，译文紧跟在那句台词下面另起一行；脚本按全文多数台词的语言统计，另一种语言的行算对照。
 - 一份文件、两种读法：带对照的 Markdown 是工作稿；导出时加 `--no-translation`，得到只有一种语言的干净稿，页数才接近"一页一分钟"。
 - 动作描写用哪种语言由项目定，写在项目的 `story/README.md`。
-- 中文对白的项目写法相同；场景标题可以写成 `## 场 NN · 内 / 外 · 地点 · 日 / 夜`。
+- 中文对白的项目写法相同；场景标题写成 `## 内 / 外 · 地点 · 时间`（场号在场标记里，标题不再写）。
 
 ## 5. 标准页与导出
 
@@ -90,7 +90,7 @@ python3 scripts/render_screenplay.py <剧本.md> --scene S03 --md <单场.md>  #
 python3 scripts/render_screenplay.py <别处来的.fountain 或 .txt> --md <稿.md>  # Fountain 纯文本转成 Markdown
 ```
 
-- 加 `--no-translation` 去掉对照翻译行；`--title` 指定标题（不给时用文件第一个一级标题）。几个选项可以一起用。
+- 加 `--no-translation` 去掉对照翻译行；`--title` 指定标题（不给时用正文之前的第一个一级标题）。几个选项可以一起用。
 - 脚本只转换格式，不改字。剧本文件本身就是整集稿，要改就改它；导出的页面和文件不手改，改完重新导出。
 - 场标记在 Fountain 里写成分节行（`# S03 · THE BAR`），转回 Markdown 时还原；标准版面和标准页上不显示。
 - 从别处拿到整集的 Fountain / txt 稿：先转成 Markdown，补上头部和场标记，再当入口用。

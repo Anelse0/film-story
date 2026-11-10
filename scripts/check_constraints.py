@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""约束检查（film-story）。把场景稿和项目约束文件对一遍，报：
-  - 场景头部必填项有没有（只查正文标记之前）
+"""约束检查（film-story）。把剧本文件和项目约束文件对一遍，报：
+  - 头部必填项有没有（只查正文标记之前）
   - 禁用词（只查正文；本版改动、批注里引用的旧句不算）
   - 每场说话人，画内 / 画外分开；画内说话人超过同框上限时提示（同框人数看动作描写，脚本不推算）
   - 动作描写里提到的已登记人物（核对谁在场）
   - 稿里出现、约束里没登记的说话人（可能是擅自新增人物）
   - 正文中的其他大写词（核对是否有未经确认的人名 / 地名 / 品牌）
+  - 正文里剩下的占位符（[AGENCY]、[CANON: …] 这类方括号标记；锁稿前清零）
   - 每场台词时长估算（约束文件有"制作参数"时）
 
-用法: python3 check_constraints.py scene.md [--constraints <项目>/story/constraints.md] [--lang auto|en|zh]
-不给 --constraints 时从场景文件往上找 story/constraints.md。约束文件格式见 templates/constraints.md。
+用法: python3 check_constraints.py <剧本.md> [--constraints <项目>/story/constraints.md] [--lang auto|en|zh]
+不给 --constraints 时从剧本文件往上找 story/constraints.md。约束文件格式见 templates/constraints.md。
 退出码恒为 0，不替人判。"""
 import argparse, re, sys
 from pathlib import Path
@@ -20,6 +21,7 @@ from project_config import find_constraints, load_constraints  # noqa: E402
 FORMAT_CUES = {'voice', 'narrator', '旁白', '画外', '画外音', 'v.o.', 'o.s.'}  # 格式词，不是人名
 CAP = re.compile(r'\b([A-Z][a-z]{2,})\b')
 CAP_STOP = {'The', 'And', 'But', 'Okay', 'Yeah', 'Hey'}
+PLACEHOLDER = re.compile(r'\[(?:CANON[^\]]*|[A-Z][A-Z0-9 _/-]{1,30})\](?!\()')  # [AGENCY]、[CANON: …]；不算 Markdown 链接
 
 
 def caps_candidates(lines, known, places):
@@ -46,7 +48,7 @@ def name_pattern(n):
 def main():
     ap = argparse.ArgumentParser(description='约束检查（film-story）：只报线索，不替人判。')
     ap.add_argument('file')
-    ap.add_argument('--constraints', help='项目约束文件；不给时从场景文件往上找 story/constraints.md')
+    ap.add_argument('--constraints', help='项目约束文件；不给时从剧本文件往上找 story/constraints.md')
     ap.add_argument('--lang', choices=('auto', 'en', 'zh'), default='auto')
     a = ap.parse_args()
     cfg = Path(a.constraints) if a.constraints else find_constraints(a.file)
@@ -70,6 +72,8 @@ def main():
         pat = re.compile(re.escape(w), re.I)
         hits += [f"行{no} “{w}”" for no, t in body if pat.search(t)]
     print('  禁用词（只查正文）：' + ('无' if not hits else '；'.join(hits)))
+    holes = [f"行{no} {m.group(0)}" for no, t in body for m in PLACEHOLDER.finditer(t)]
+    print('  占位符（锁稿前清零）：' + ('无' if not holes else '；'.join(holes[:20]) + (f' 等 {len(holes)} 处' if len(holes) > 20 else '')))
 
     names = {n.casefold(): n for n in cons['人物']}
     places = {p.casefold() for p in cons['地点']}
@@ -86,7 +90,7 @@ def main():
         size = sum(size_of(x['text'], lang) for x in sc['lines'])
         dur = f"台词约 {round(size / per_sec, 1)} s" if per_sec else f"台词 {size} {unit}（约束文件没有制作参数，不估秒）"
         who = f"说话人 {len(table)}（画内 {len(on)}：{'、'.join(on) or '无'}" + (f"；画外 {len(off)}：{'、'.join(off)}" if off else '') + '）'
-        print(f"  场「{sc['mark'] + ' · ' if sc.get('mark') else ''}{sc['title']}」：{who} · {dur}")
+        print(f"  场「{sc['mark'] + ' · ' if sc.get('mark') and sc['mark'] != sc['title'] else ''}{sc['title']}」：{who} · {dur}")
         seen = [n for n in cons['人物'] if any(name_pattern(n).search(t) for _, t in sc['action'])]
         if seen:
             print(f"    动作描写提到的已登记人物：{'、'.join(seen)}（谁在场、谁同框以正文为准）")

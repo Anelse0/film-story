@@ -2,22 +2,27 @@
 """比稿（film-story）。把剧本的两个版本逐场对一遍，报三件事：
   - 结构有没有变：场（场标记）、场景标题、每场的说话人。精修不该动这些；重写动了要回头改节拍单。
   - 改了哪些句子：台词和动作段的 改 / 删 / 加，台词按"本版改动"的写法列出来，贴进剧本头部之前逐条核对。
-  - 带上精修简报（--brief）时：简报里锁定的台词是不是逐字都在；登记了局部重写的场，结构变化单列，不算越界。
+  - 带上精修简报（--brief）时：简报里锁定的台词是不是逐字都在；指定改法是不是都改了；登记了局部重写的场，
+    结构变化单列，不算越界。
+另报表演线索前后的数（停手、停顿、对视、填充词、没说完），只数不判，用来看这一轮有没有成套地加停顿和填充词。
 
 用法:
   python3 compare_drafts.py <旧稿.md> <新稿.md> [--brief <精修简报.md>] [--dialogue-only]
                             [--lang auto|en|zh] [--constraints <项目>/story/constraints.md] [--wps N] [--cps N] [--json]
   python3 compare_drafts.py <剧本.md> --rev HEAD [--brief …]   和 git 里的那一版比（HEAD、HEAD~1、tag、提交号都行）
-  python3 compare_drafts.py <剧本.md> --brief <精修简报.md>     不比稿，只核对锁定的台词
+  python3 compare_drafts.py <剧本.md> --brief <精修简报.md>     不比稿，只核对锁定的台词和指定改法
   python3 compare_drafts.py <英文版.md> <中文版.md> --dialogue-only   只比对白：两个语言版本的台词是不是逐句相同
 
 只比正文（<!-- script-body:start/end --> 之间），只比全文多数台词的那种语言，对照翻译行不比。两版都有场标记时按
 场标记对齐，否则按场景标题对齐。句子靠字面相似度配对：同一个说话人、改动不大的算"改"，其余算"删"和"加"；
 挪了位置的句子会显示成一删一加。
 
-简报里脚本读两样（写法见 templates/polish-brief.md）：
+简报里脚本读三样（写法见 templates/polish-brief.md）：
   - "锁定的台词"一节里的行：`- S03 > 原句`
-  - 逐场表里写了"局部重写"的行：`| S09 · 名字 | 局部重写 | …`
+  - "指定改法"一节里的行：`- S06 > 现在的句子 → 改成的句子（原因）`
+  - 逐场表里第二栏写着"局部重写"的行：`| S09 · 名字 | 局部重写 | …`
+场号 S03、s3、场 03 算同一场。剧本不是每场都有场标记时，锁定的台词和指定改法在全文里找，登记的局部重写认不出，
+输出里会提示。
 只报事实，不判好坏；退出码恒为 0。"""
 import argparse, difflib, json, os, re, subprocess, sys, tempfile
 from pathlib import Path
@@ -28,8 +33,10 @@ import check_dialogue as cd  # noqa: E402
 PAIR = {'line': 0.4, 'para': 0.5}  # 字面相似度到这个数才算"改"，不到算一删一加 [推论]
 CLIP = 60                          # 动作段在清单里最多显示这么多格
 LOCKED = re.compile(r'^[-*]\s*((?:S|场\s*)\d+[a-z]?)\s*>\s*(.+?)\s*$', re.I)
-SCENE_ROW = re.compile(r'^\|\s*\**\s*((?:S|场\s*)\d+[a-z]?)\b', re.I)
+SCENE_CELL = re.compile(r'^\**\s*((?:S|场\s*)\d+[a-z]?)\b', re.I)
+REASON = re.compile(r'\s*(?:（[^）]*）|\s\([^)]*\))\s*$')  # 指定改法末尾括号里的原因，全角半角都认
 QUOTES = str.maketrans({'“': '"', '”': '"', '‘': "'", '’': "'"})
+ARROW = re.compile(r'\s*(?:→|->)\s*')
 
 
 def units(scenes, by_mark):
@@ -50,18 +57,21 @@ def units(scenes, by_mark):
     return out
 
 
-def has_marks(scenes):
-    return bool(scenes) and all(sc['mark'] for sc in scenes if sc['lines'] or sc['action'] or sc['mark'])
+def mark_state(scenes):
+    """'all'：每一段都在某个场标记下面；'some'：只有一部分有；'none'：没有场标记。"""
+    marks = [bool(sc['mark']) for sc in scenes if sc['lines'] or sc['action'] or sc['mark']]
+    return 'all' if marks and all(marks) else 'some' if any(marks) else 'none'
 
 
 def ratio(a, b):
     return difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
 
 
-def diff_items(old, new, same_owner, text_of, threshold):
-    """两串条目对一遍 → (改 [(旧, 新)], 删 [旧], 加 [新])。same_owner：两条能不能配成"改"（台词要同一个说话人）。"""
+def diff_items(old, new, same_owner, text_of, threshold, key_of=repr):
+    """两串条目对一遍 → (改 [(旧, 新)], 删 [旧], 加 [新])。same_owner：两条能不能配成"改"（台词要同一个说话人）。
+    key_of：两条算不算同一条（台词不计角色名的大小写）。"""
     changed, removed, added = [], [], []
-    sm = difflib.SequenceMatcher(None, [repr(x) for x in old], [repr(x) for x in new], autojunk=False)
+    sm = difflib.SequenceMatcher(None, [key_of(x) for x in old], [key_of(x) for x in new], autojunk=False)
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag == 'equal':
             continue
@@ -83,48 +93,90 @@ def volume(lines, lang, rate):
     return size, (round(size / rate, 1) if rate else None)
 
 
+def unquote(text):
+    text = text.translate(QUOTES).strip()
+    return text[1:-1].strip() if len(text) > 1 and text[0] == text[-1] == '"' else text
+
+
 def read_brief(path):
-    """精修简报里脚本要用的两样：锁定的台词 [(场号, 原句)]，登记了局部重写的场 {场号}。"""
-    locked, rewrite, in_locked = [], set(), False
+    """精修简报里脚本要用的三样：锁定的台词 [(场号, 原句)]，指定改法 [(场号, 旧句, 新句)]，登记了局部重写的场 {场号}。"""
+    locked, edits, rewrite, where = [], [], set(), ''
     for line in Path(path).read_text(encoding='utf-8').splitlines():
         s = line.strip()
         if s.startswith('#'):
-            in_locked = '锁定' in s and '台词' in s
+            where = 'locked' if '锁定' in s and '台词' in s else 'edits' if '指定改法' in s else ''
             continue
         m = LOCKED.match(s)
-        if in_locked and m:
-            text = m.group(2).translate(QUOTES)
-            if len(text) > 1 and text[0] == text[-1] == '"':
-                text = text[1:-1]
-            locked.append((m.group(1), text.strip()))
-        m = SCENE_ROW.match(s)
-        if m and '局部重写' in s:
-            rewrite.add(cd.mark_label(m.group(1)))
-    return locked, rewrite
+        if m and where == 'locked':
+            locked.append((m.group(1), unquote(m.group(2))))
+        elif m and where == 'edits':
+            parts = ARROW.split(REASON.sub('', m.group(2)), maxsplit=1)
+            if len(parts) == 2:
+                edits.append((m.group(1), unquote(parts[0]), unquote(parts[1])))
+        if s.startswith('|'):  # 逐场表：第一栏是场，第二栏正好是"局部重写"才算登记
+            cells = [c.strip() for c in s.strip('|').split('|')]
+            m = SCENE_CELL.match(cells[0]) if len(cells) > 1 else None
+            if m and cells[1].strip('* ') == '局部重写':
+                rewrite.add(cd.mark_label(m.group(1)))
+    return locked, edits, rewrite
 
 
 def norm(text):
     return re.sub(r'\s+', ' ', text.translate(QUOTES)).strip()
 
 
+def pool_of(us, by_mark, scene):
+    """这一场的台词。没有按场标记对齐时在全文里找；按场标记对齐而剧本里没有这一场，返回 None。"""
+    if not by_mark:
+        return [t for u in us.values() for _, t in u['lines']]
+    key = cd.mark_label(scene)
+    return [t for _, t in us[key]['lines']] if key in us else None
+
+
 def check_locked(us, by_mark, locked):
-    """锁定的台词是不是逐字都在（在它那一场的某句台词里）。返回 {'total', 'missing': [{'scene', 'text', 'closest'}]}。"""
-    everything = [t for u in us.values() for _, t in u['lines']]
+    """锁定的台词是不是逐字都在（在它那一场的某句台词里）。
+    返回 {'total', 'missing': [{'scene', 'text', 'closest', 'no_scene'}]}。"""
     missing = []
     for scene, text in locked:
-        key = cd.mark_label(scene)
-        pool = [t for _, t in us[key]['lines']] if by_mark and key in us else everything
-        if not any(norm(text) in norm(t) for t in pool):
-            best = max(pool or everything or [''], key=lambda t: ratio(norm(text), norm(t)))
-            missing.append({'scene': scene, 'text': text, 'closest': best if ratio(norm(text), norm(best)) >= 0.5 else ''})
+        pool = pool_of(us, by_mark, scene)
+        if pool is None:
+            missing.append({'scene': scene, 'text': text, 'closest': '', 'no_scene': True})
+        elif not any(norm(text) in norm(t) for t in pool):
+            best = max(pool or [''], key=lambda t: ratio(norm(text), norm(t)))
+            missing.append({'scene': scene, 'text': text, 'no_scene': False,
+                            'closest': best if ratio(norm(text), norm(best)) >= 0.5 else ''})
     return {'total': len(locked), 'missing': missing}
+
+
+def check_edits(us, by_mark, edits):
+    """指定改法是不是都改了：新句要在它那一场里。返回 {'total', 'missing': [{'scene', 'old', 'new', 'old_still'}]}。"""
+    missing = []
+    for scene, old, new in edits:
+        pool = pool_of(us, by_mark, scene)
+        if pool is None:
+            missing.append({'scene': scene, 'old': old, 'new': new, 'old_still': False, 'no_scene': True})
+        elif not any(norm(new) in norm(t) for t in pool):
+            missing.append({'scene': scene, 'old': old, 'new': new, 'no_scene': False,
+                            'old_still': any(norm(old) in norm(t) for t in pool)})
+    return {'total': len(edits), 'missing': missing}
+
+
+def perf_totals(scenes):
+    out = {k: 0 for k, _ in cd.PERF_KEYS}
+    for sc in scenes:
+        cues = cd.performance_cues(sc)
+        for k in out:
+            out[k] += cues[k]
+    return out
 
 
 def locked_only(path, brief, lang='auto'):
     scenes, meta = cd.parse(path, lang)
-    by_mark = has_marks(scenes)
-    locked, rewrite = read_brief(brief)
-    return {'lang': meta['lang'], 'by_mark': by_mark, 'locked': check_locked(units(scenes, by_mark), by_mark, locked)}
+    marks = mark_state(scenes)
+    locked, edits, _ = read_brief(brief)
+    us = units(scenes, marks == 'all')
+    return {'lang': meta['lang'], 'by_mark': marks == 'all', 'marks': marks,
+            'locked': check_locked(us, marks == 'all', locked), 'edits': check_edits(us, marks == 'all', edits)}
 
 
 def compare(old_path, new_path, lang='auto', constraints=None, wps=None, cps=None, brief=None, dialogue_only=False):
@@ -132,11 +184,13 @@ def compare(old_path, new_path, lang='auto', constraints=None, wps=None, cps=Non
     new_scenes, meta = cd.parse(new_path, lang)
     lang = meta['lang']
     old_scenes, old_meta = cd.parse(old_path, lang)
-    rates, names, cfg, warn = cd.project_settings(new_path, constraints, wps, cps)
+    rates, _, _, warn = cd.project_settings(new_path, constraints, wps, cps)
     rate = rates.get('wps' if lang == 'en' else 'cps')
-    by_mark = has_marks(old_scenes) and has_marks(new_scenes)
+    states = {mark_state(old_scenes), mark_state(new_scenes)}
+    by_mark = states == {'all'}
+    marks = 'all' if by_mark else 'none' if states == {'none'} else 'some'
     old, new = units(old_scenes, by_mark), units(new_scenes, by_mark)
-    locked, rewrite = read_brief(brief) if brief else ([], set())
+    locked, edits, rewrite = read_brief(brief) if brief else ([], [], set())
     found = []  # (场的 key 或 None, 说明)
     for k in old:
         if k not in new:
@@ -163,7 +217,7 @@ def compare(old_path, new_path, lang='auto', constraints=None, wps=None, cps=Non
             found.append((k, f"{tag}：说话人" + '；'.join(x for x in ('少了 ' + '、'.join(lost) if lost else '',
                                                                  '多了 ' + '、'.join(got) if got else '') if x)))
         lc, lr, la = diff_items(o['lines'], n['lines'], lambda a, b: a[0].casefold() == b[0].casefold(),
-                                lambda x: x[1], PAIR['line'])
+                                lambda x: x[1], PAIR['line'], key_of=lambda x: (x[0].casefold(), x[1]))
         pc, pr, pa = ([], [], []) if dialogue_only else diff_items(o['paras'], n['paras'], lambda a, b: True,
                                                                    lambda x: x, PAIR['para'])
         (s0, t0), (s1, t1) = volume(o['lines'], lang, rate), volume(n['lines'], lang, rate)
@@ -178,10 +232,13 @@ def compare(old_path, new_path, lang='auto', constraints=None, wps=None, cps=Non
         items += [{'scene': tag, 'kind': '加', 'what': 'para', 'new': b} for b in pa]
     total = lambda us: (sum(len(u['lines']) for u in us.values()), sum(len(u['paras']) for u in us.values()),  # noqa: E731
                         volume([x for u in us.values() for x in u['lines']], lang, rate))
-    return {'lang': lang, 'by_mark': by_mark, 'n_units': [len(old), len(new)], 'dialogue_only': dialogue_only,
+    return {'lang': lang, 'by_mark': by_mark, 'marks': marks, 'n_units': [len(old), len(new)],
+            'dialogue_only': dialogue_only, 'unseen_rewrite': bool(rewrite) and not by_mark,
             'structure': [msg for k, msg in found if k not in rewrite],
             'declared': [msg for k, msg in found if k in rewrite],
             'locked': check_locked(new, by_mark, locked) if brief else None,
+            'edits': check_edits(new, by_mark, edits) if brief else None,
+            'performance': None if dialogue_only else {'old': perf_totals(old_scenes), 'new': perf_totals(new_scenes)},
             'scenes': per, 'items': items, 'old_total': total(old), 'new_total': total(new),
             'unit': cd.UNIT_NAME[lang], 'body': [old_meta['body'], meta['body']], 'warn': warn}
 
@@ -213,9 +270,14 @@ def from_git(path, rev):
     return tmp.name, ''
 
 
-def show_locked(lk):
+MARKS_NOTE = {'some': '不是每个场景标题前都有场标记', 'none': '没有场标记'}
+
+
+def show_locked(lk, marks='all'):
     if lk is None:
         return
+    if lk['total'] and marks != 'all':
+        print(f"  ⚠ {MARKS_NOTE[marks]}：锁定的台词和指定改法在全文里找，不分场。")
     if not lk['total']:
         print('  锁定的台词：简报里没有列（"锁定的台词"一节下面写 `- S03 > 原句`）。')
     elif not lk['missing']:
@@ -223,7 +285,22 @@ def show_locked(lk):
     else:
         print(f"  ⚠ 锁定的台词少了 {len(lk['missing'])} 句（共 {lk['total']} 句）：")
         for x in lk['missing']:
-            print(f"    - {x['scene']} > {x['text']}" + (f"（现在最接近的一句：{x['closest']}）" if x['closest'] else '（这一场里找不到接近的）'))
+            why = '剧本里没有这一场的场标记' if x['no_scene'] else \
+                f"现在最接近的一句：{x['closest']}" if x['closest'] else '这一场里找不到接近的'
+            print(f"    - {x['scene']} > {x['text']}（{why}）")
+
+
+def show_edits(ed):
+    if not ed or not ed['total']:
+        return
+    if not ed['missing']:
+        print(f"  指定改法：{ed['total']} 处都改了。")
+    else:
+        print(f"  ⚠ 指定改法有 {len(ed['missing'])} 处没改（共 {ed['total']} 处）：")
+        for x in ed['missing']:
+            why = '剧本里没有这一场的场标记' if x['no_scene'] else \
+                '旧句还在：' + x['old'] if x['old_still'] else '旧句也不在了，核对一下改成了什么'
+            print(f"    - {x['scene']} > {x['new']}（{why}）")
 
 
 def show(r, old_name, new_name):
@@ -232,7 +309,7 @@ def show(r, old_name, new_name):
     (ol, op, (osz, ot)), (nl, np_, (nsz, nt)) = r['old_total'], r['new_total']
     print(f"== 比稿：{old_name} → {new_name} ==")
     how = f"按场标记对齐（{r['n_units'][0]} → {r['n_units'][1]} 场）" if r['by_mark'] else \
-        f"没有场标记，按场景标题对齐（{r['n_units'][0]} → {r['n_units'][1]} 个）"
+        f"{MARKS_NOTE[r['marks']]}，按场景标题对齐（{r['n_units'][0]} → {r['n_units'][1]} 个）"
     print(f"  语言：{cd.LANG_NAME[r['lang']]} · {how}" + (' · 只比对白' if r['dialogue_only'] else ''))
     if 'no-markers' in r['body']:
         print('  ⚠ 有一版没有正文标记，按全文读：头部和批注会混进来，结果只作参考')
@@ -247,11 +324,17 @@ def show(r, old_name, new_name):
         print('  登记了局部重写的场有结构变化（简报里写了，不算越界）：')
         for x in r['declared']:
             print('    - ' + x)
-    show_locked(r['locked'])
+    if r['unseen_rewrite']:
+        print(f"  ⚠ {MARKS_NOTE[r['marks']]}：认不出简报里登记了局部重写的场，它的结构变化会列在上面。")
+    show_locked(r['locked'], r['marks'])
+    show_edits(r['edits'])
     vol = f" · {osz} → {nsz} {r['unit']}" + (f"（{sec(ot)} → {sec(nt)}）" if ot is not None else '')
     print(f"  台词：{ol} → {nl} 句 · 改 {c('line_changed')} · 删 {c('line_removed')} · 加 {c('line_added')}{vol}")
     if not r['dialogue_only']:
         print(f"  动作：{op} → {np_} 段 · 改 {c('para_changed')} · 删 {c('para_removed')} · 加 {c('para_added')}")
+    if r['performance']:
+        po, pn = r['performance']['old'], r['performance']['new']
+        print('  表演线索（只数不判）：' + ' · '.join(f"{name} {po[k]} → {pn[k]}" for k, name in cd.PERF_KEYS))
     touched = [s for s in r['scenes'] if any(s[k] for k in s if k.startswith(('line_', 'para_')))]
     if touched:
         print('  按场（只列有变化的）：')
@@ -283,10 +366,10 @@ def show(r, old_name, new_name):
 
 
 def main():
-    ap = argparse.ArgumentParser(description='比稿（film-story）：两版剧本的结构有没有变、改了哪些句子、锁定的台词在不在。')
+    ap = argparse.ArgumentParser(description='比稿（film-story）：两版剧本的结构有没有变、改了哪些句子；带精修简报时核对锁定的台词和指定改法。')
     ap.add_argument('files', nargs='+', help='旧稿 新稿；或只给一个文件，加 --rev 或 --brief')
     ap.add_argument('--rev', help='和 git 里的这一版比（只给一个文件时用），如 HEAD')
-    ap.add_argument('--brief', help='精修简报：核对锁定的台词；登记了局部重写的场，结构变化单列')
+    ap.add_argument('--brief', help='精修简报：核对锁定的台词和指定改法；登记了局部重写的场，结构变化单列')
     ap.add_argument('--dialogue-only', action='store_true', help='只比对白，不比动作和场景标题（核对两个语言版本）')
     ap.add_argument('--lang', choices=('auto', 'en', 'zh'), default='auto')
     ap.add_argument('--constraints', help='项目约束文件；不给时从新稿往上找 story/constraints.md')
@@ -303,8 +386,9 @@ def main():
         if a.json:
             print(json.dumps(r, ensure_ascii=False, indent=2))
         else:
-            print(f"== 核对锁定的台词：{Path(a.files[0]).name} ==")
-            show_locked(r['locked'])
+            print(f"== 核对锁定的台词和指定改法：{Path(a.files[0]).name} ==")
+            show_locked(r['locked'], r['marks'])
+            show_edits(r['edits'])
         return
     if a.rev and len(a.files) == 1:
         new = a.files[0]

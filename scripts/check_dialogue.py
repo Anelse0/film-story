@@ -2,12 +2,13 @@
 """对白检查（film-story）。只数能数的东西，给人看线索；不打分，不判通过。
 
 用法:
-  python3 check_dialogue.py scene.md [scene2.md ...] [--lang auto|en|zh]
+  python3 check_dialogue.py <剧本.md> [更多.md ...] [--lang auto|en|zh]
                             [--constraints <项目>/story/constraints.md] [--wps N] [--cps N] [--json]
 
 正文：只读 <!-- script-body:start --> 与 <!-- script-body:end --> 之间（可以有多段）；头部、本版改动、批注、备选台词
 在标记之外，不计入。没有标记的旧文件按全文读并提示；标记不成对时报格式问题，按能推断的范围读。
-一集一个文件时，每场开头的场标记 <!-- S03 · 名字 -->（或 <!-- 场 03 · 名字 -->）会带到输出里，文末按场合计台词量。
+一集一个文件时，每场开头的场标记 <!-- S03 · 名字 -->（或 <!-- 场 03 · 名字 -->）开始新的一场，带到输出里，文末按场
+合计台词量。有正文标记的文件里，二级标题（## …）都算场景标题，不管写的是 INT. / EXT. 还是"内 · 地点 · 夜"。
 
 识别四种写法（混用也行）：
   1) **NAME** 单独一行，下面到空行为止是台词块（标准剧本格式的 Markdown 写法，见 references/screenplay-format.md）；
@@ -22,12 +23,14 @@
 语言（--lang）：auto（默认：按全文多数台词的语言定，另一种算对照翻译）/ en / zh。中文统计句数、字数、问句、接话链
 （只按问号）和解释 / 复述 / 泛称开头 / "不是……而是……"四类词面线索；"与上一句实词重合"要分词，中文不支持，输出里写明。
 
-时长：语速和单条生成上限读项目约束文件的"## 制作参数"（--constraints 指定，或从场景文件往上找 story/constraints.md），
+时长：语速和单条生成上限读项目约束文件的"## 制作参数"（--constraints 指定，或从剧本文件往上找 story/constraints.md），
 --wps / --cps 临时指定；都没有就只报词数 / 字数，不估秒，不提拆条。估的是口播时长，不是成片时长。
 
 输出每场：句数、说话人分布（画外单独标出）、词数或字数、连续接话、短句占比、问句过半的说话人、词面线索、括号里的
 情绪标签；动作描写另给三条线索（只在有正文标记的文件上给）：一段折合标准版面几行、看不见的心理词、最长一串中间没有
-动作的对白。所有阈值都是 [推论]，在 THRESH 里改。退出码恒为 0。"""
+动作的对白；再加一行表演线索，只数不判：人物停手、停顿（Beat）、对视各几处，口头填充词、没说完的句子各几句（做表演
+驱动的对白精修时前后对比用，见 references/polish.md）。所有阈值都是 [推论]，在 THRESH 里改；表演线索的词表在 STOP_EN 一带，按字面数，会有误计（"音乐停了"也算停手）。
+退出码恒为 0。"""
 import argparse, json, math, re, sys, statistics, unicodedata
 from pathlib import Path
 
@@ -38,8 +41,10 @@ THRESH = {
     'pingpong_run': 4,        # 连续 ≥4 句都换人且接着上一句 → 提示"连续接话"
     'short_words': 3,         # 英文 ≤3 词算短句
     'short_chars': 5,         # 中文 ≤5 字算短句
-    'short_share_warn': 0.5,  # 短句占比 ≥50% 提示
-    'echo_overlap': 0.5,      # 与上一句实词重合 ≥50%（只算英文）
+    'short_share_warn': 0.5,  # 短句占比 ≥50% 提示……
+    'short_min_lines': 6,     # ……且全场至少 6 句
+    'echo_overlap': 0.5,      # 与上一句实词重合 ≥50%（只算英文）……
+    'echo_min_words': 2,      # ……且这一句至少 2 个实词
     'question_share': 0.5,    # 某人问句占其台词 ≥50%……
     'question_min': 3,        # ……且至少 3 句 → 提示"一直在问"
     'action_lines_max': 4,    # 动作描写一段折合标准版面（一行 60 格）超过 4 行 → 提示"动作段偏长"
@@ -61,6 +66,7 @@ QUOTED = re.compile(r'[“"]([^”"]+)[”"]')
 CJK = re.compile(r'[一-鿿]')
 FULLWIDTH = re.compile(r'[，。！？、；：（）《》]')
 SCENE_HEAD = re.compile(r'^(?:#+\s*)?(?:场\s*\d|SCENE\b|INT\.|EXT\.|EST\.|I/E\b|冷开)|^#+\s*\d{1,3}\s*[｜|]', re.I)
+H2 = re.compile(r'^##\s+\S')  # 有正文标记的文件里，二级标题都算场景标题
 TRANSITION = re.compile(r"^(?:>\s*)?(?:[A-Z][A-Z .']*\bTO:|FADE (?:IN|OUT)\s*[.:]?|(?:FADE|(?:SMASH )?CUT) TO BLACK\.?)$")
 WORD = re.compile(r"[A-Za-z][A-Za-z'’-]*")
 OFFSCREEN = re.compile(r"电话里|电话那头|电话那边|手机里|屏幕里|视频里|画外|旁白|广播里|对讲机里|"
@@ -92,6 +98,18 @@ ANTITHESIS_ZH = [re.compile(p) for p in (r"不是[^，。！？]{1,20}[，,]?\s*
 INNER_EN = re.compile(r"\b(feels?|felt|realizes?|realized|thinks?|wonders?|remembers?|knows?|knew|decides?|hopes?|"
                       r"wishes|expects?|expected|understands?|wants? to)\b", re.I)
 INNER_ZH = re.compile(r"感到|觉得|心想|(?<!手)心里|内心|意识到|想起|明白了|后悔|暗自|不禁|仿佛在说|似乎在想|知道自己|决定")
+# 表演线索的词表（通用默认，只数不判；不准就在这里调）
+STOP_EN = re.compile(r"\b(stops?|stopped|freezes?|froze|goes still|go still)\b", re.I)
+STOP_ZH = re.compile(r"停下|停住|停了|停手|顿住|顿了|不动了|僵住")
+BEAT_EN = re.compile(r"\bbeat\b(?! (?:the|of|up|him|her|them)\b)|^pause\.?$|^silence\.?$", re.I)
+BEAT_ZH = re.compile(r"^(?:停顿|沉默|静默|一拍)")
+LOOK_EN = re.compile(r"\b(?:looks?|glances?|stares?|gazes?) (?:up |over |back |down )?at\b|\bwatches\b|"
+                     r"\bwatch(?:ing)? (?:him|her|them|it|each other)\b|\beyes meet\b|"
+                     r"\bholds? (?:his|her|their|the) (?:look|gaze|eyes)\b", re.I)
+LOOK_ZH = re.compile(r"看着|看向|盯着|望着|对视|看了.{0,4}一眼")
+FILLER_EN = re.compile(r"\b(?:uh+|um+|erm?)\b|(?:^|[,.…—–-]\s*)(?:you know|i mean)(?=\s*[,.…—–!?]|\s*$)", re.I)
+FILLER_ZH = re.compile(r"嗯[，,…]|呃|那个[，,…]|就是说|怎么说呢")
+UNFINISHED = re.compile(r"(?:—|--|…|\.\.\.)[\"”’']?$")
 EMO_PAREN = re.compile(r"(?<!压)低声|[，,]\s*平[）)]|平静|冷冷|冷淡|讽刺|深情|愤怒|悲伤|激动|温柔|坚定|quietly|coldly|softly|sarcastic|"
                        r"angrily|bitterly|tenderly|firmly|calmly", re.I)
 HEADER_WORDS = {'承接', '后续', '版本', '状态', '依据', '位置', '标题', '场序', '人物', '服装说明', '声音', '气场', '设计取向', '主线', '说明', '来源', '注', '新事实', '新事实（提案）', '本场改变了什么', '改动清单', '连带影响', '本版改动', '本轮目标', '改', '删', '加', '备选', '批注', '上一版'}
@@ -245,9 +263,13 @@ def _loose_block(body, i, sp, cur):
     return i
 
 
-def _scene(title):
+def _scene(title, headed=None):
     return {'title': title, 'mark': '', 'lines': [], 'parens': [], 'action': [], 'speeches': [],
-            'headed': title != '(开头)'}
+            'headed': title != '(开头)' if headed is None else headed}
+
+
+def _has_content(sc):
+    return bool(sc['headed'] or sc['speeches'] or sc['parens'] or sc['action'])
 
 
 def parse(path, lang='auto'):
@@ -266,13 +288,16 @@ def parse(path, lang='auto'):
             continue
         if s.startswith('<!--'):
             m = SCENE_MARK.match(s)
-            if m:  # 场标记：后面的场景标题都属于这一场，直到下一个场标记
+            if m:  # 场标记：从这里开始新的一场；后面的场景标题都属于它，直到下一个场标记
                 mark = m.group(1)
-                if not (cur['headed'] or cur['speeches'] or cur['parens'] or cur['action']):
-                    cur['mark'] = mark
+                if _has_content(cur):
+                    scenes.append(cur)
+                cur = _scene(mark, headed=False)  # 后面没跟场景标题时，用场标记当这一段的标题
+                cur['mark'] = mark
             continue
-        if SCENE_HEAD.match(s) and not CUE_INLINE.match(s):
-            if cur['headed'] or cur['speeches'] or cur['parens'] or cur['action']:
+        heading = SCENE_HEAD.match(s) or (note != 'no-markers' and H2.match(s))
+        if heading and not CUE_INLINE.match(s):
+            if _has_content(cur):
                 scenes.append(cur)
             cur = _scene(s.lstrip('#').strip())
             cur['mark'] = mark
@@ -304,7 +329,7 @@ def parse(path, lang='auto'):
             cur['parens'].append(s)
             continue
         cur['action'].append((no, s))
-    if cur['headed'] or cur['speeches'] or cur['parens'] or cur['action']:
+    if _has_content(cur):
         scenes.append(cur)
 
     firsts = [sp['first'] for sc in scenes for sp in sc['speeches']]
@@ -322,11 +347,6 @@ def parse(path, lang='auto'):
                                 'offscreen': bool(OFFSCREEN.search(paren)) or sp['speaker'].casefold() in NARRATOR})
         sc.pop('headed')
     return scenes, {'body': note, 'lang': primary, 'other_lang_speeches': other, 'body_lines': len(body)}
-
-
-def extract(path, lang='auto'):
-    """兼容旧接口：只返回场景列表。"""
-    return parse(path, lang)[0]
 
 
 def content_words(t):
@@ -357,9 +377,10 @@ def display_width(t):
 
 
 def mark_label(text):
-    """场标记开头的场号，去空格、不分大小写："S03 · THE BAR" → "s03"，"场 03 · 餐厅" → "场03"。"""
-    m = re.match(r'(?:S|场\s*)\d+[a-z]?', text.strip(), re.I)
-    return re.sub(r'\s+', '', m.group(0) if m else text).casefold()
+    """场号归一成数字："S03 · THE BAR"、"s3"、"场 03 · 餐厅" 都得到 "3"；插入的场带字母（"S02b" → "2b"）。
+    认不出场号的原样返回（去空格、小写）。"""
+    m = re.match(r'(?:S|场)\s*0*(\d+)([a-z]?)', text.strip(), re.I)
+    return m.group(1) + m.group(2).lower() if m else re.sub(r'\s+', '', text).casefold()
 
 
 def action_paragraphs(scene):
@@ -395,6 +416,23 @@ def action_cues(scene):
             'dialogue_run': best, 'run_span': span, 'marks': marks}
 
 
+def performance_cues(scene):
+    """表演线索，只数不判：动作描写里人物停手、停顿（Beat）、对视各几处；台词里口头填充词、没说完的句子各几句。
+    用途是前后两版对比（有没有成套地加停顿和填充词，是不是一到要紧的话就停手），不是越少越好。"""
+    plain = [x for para in action_paragraphs(scene) for x in para]
+    bare = lambda t: t.strip('（()）. 。')  # noqa: E731
+    stops = [(no, t) for no, t in plain if STOP_EN.search(t) or STOP_ZH.search(t)]
+    beats = sum(1 for t in [t for _, t in plain] + list(scene.get('parens', []))
+                if BEAT_EN.search(bare(t)) or BEAT_ZH.search(bare(t)))
+    return {'stops': len(stops), 'stop_lines': stops, 'beats': beats,
+            'looks': sum(1 for _, t in plain if LOOK_EN.search(t) or LOOK_ZH.search(t)),
+            'fillers': sum(1 for x in scene['lines'] if FILLER_EN.search(x['text']) or FILLER_ZH.search(x['text'])),
+            'unfinished': sum(1 for x in scene['lines'] if UNFINISHED.search(x['text'].strip()))}
+
+
+PERF_KEYS = (('stops', '停手'), ('beats', '停顿'), ('looks', '对视'), ('fillers', '填充词'), ('unfinished', '没说完'))
+
+
 def analyse(scene, lang='en', rates=None, names=None, action=True):
     rates = rates or {}
     L = scene['lines']
@@ -411,6 +449,8 @@ def analyse(scene, lang='en', rates=None, names=None, action=True):
         if act['dialogue_run'] >= THRESH['dialogue_run']:
             out['flags'].append(f"连续 {act['dialogue_run']} 句对白中间没有动作段（行 {act['run_span'][0]}–{act['run_span'][1]}）。"
                                 f"核对这一段里听的人有没有反应的位置；快速来回的戏保留（表面线索）[推论]")
+    if action and (L or scene.get('action')):
+        out['performance'] = performance_cues(scene)
     if not L:
         return out
     unit = UNIT_NAME[lang]
@@ -439,7 +479,7 @@ def analyse(scene, lang='en', rates=None, names=None, action=True):
         basis = '问号或相同实词' if lang == 'en' else '问号；中文不比较实词'
         out['flags'].append(f"连续接话：{best + 1} 句每句都换人、接着上一句（行 {best_span[0]}–{best_span[1]}；表面线索：{basis}）。"
                             f"复核这几句是不是都只在回答上一句、两人是不是都在回答作者；处境需要的保留 [推论]")
-    if out['short_share'] >= THRESH['short_share_warn'] and len(L) >= 6:
+    if out['short_share'] >= THRESH['short_share_warn'] and len(L) >= THRESH['short_min_lines']:
         out['flags'].append(f"短句占比 {out['short_share']:.0%}：核对是一人一句的口号式短语，还是有真实往来（表面线索，需人工判断）[推论]")
     for d in table:
         if d['questions'] >= THRESH['question_min'] and d['questions'] / d['lines'] >= THRESH['question_share']:
@@ -455,7 +495,7 @@ def analyse(scene, lang='en', rates=None, names=None, action=True):
             if any(p.search(t) for p in ANTITHESIS): tags.append(TAG['antithesis'])
             if k and x['speaker'].casefold() != L[k - 1]['speaker'].casefold():
                 a, b = set(content_words(t)), set(content_words(L[k - 1]['text']))
-                if a and b and len(a & b) / len(a) >= THRESH['echo_overlap'] and len(a) >= 2:
+                if a and b and len(a & b) / len(a) >= THRESH['echo_overlap'] and len(a) >= THRESH['echo_min_words']:
                     tags.append(TAG['echo'])
         else:
             if EXPLAIN_ZH.search(t): tags.append(TAG['explain'])
@@ -556,7 +596,7 @@ def main():
     ap = argparse.ArgumentParser(description='对白检查（film-story）：只给词面与结构线索，不打分。')
     ap.add_argument('files', nargs='+')
     ap.add_argument('--lang', choices=('auto', 'en', 'zh'), default='auto', help='台词语言；默认按全文多数台词判断')
-    ap.add_argument('--constraints', help='项目约束文件；不给时从场景文件往上找 story/constraints.md')
+    ap.add_argument('--constraints', help='项目约束文件；不给时从剧本文件往上找 story/constraints.md')
     ap.add_argument('--wps', type=float, help='英文语速（词/秒），临时覆盖配置')
     ap.add_argument('--cps', type=float, help='中文语速（字/秒），临时覆盖配置')
     ap.add_argument('--json', action='store_true')
@@ -571,7 +611,7 @@ def main():
         print(f"\n== {meta['file']} ==")
         print(describe(meta))
         for r in results:
-            print(f"-- {'[' + r['mark'] + '] ' if r.get('mark') else ''}{r['title']}")
+            print(f"-- {'[' + r['mark'] + '] ' if r.get('mark') and r['mark'] != r['title'] else ''}{r['title']}")
             if not r['n_lines']:
                 other = meta['other_lang_speeches']
                 if other:
@@ -589,6 +629,11 @@ def main():
             if act:
                 run = f" · 最长连续对白 {act['dialogue_run']} 句" if r['n_lines'] else ''
                 print(f"  动作描写 {act['paras']} 段 · 最长一段约 {act['max_lines']} 行（标准版面一行 {ACTION_COLS} 格）{run}")
+            perf = r.get('performance')
+            if perf and any(perf[k] for k, _ in PERF_KEYS):
+                print('  表演线索（只数不判）：' + ' · '.join(f"{name} {perf[k]}" for k, name in PERF_KEYS))
+                for no, t in perf['stop_lines'][:8]:
+                    print(f"    停手 行{no} “{t}”")
             for fl in r['flags']:
                 print('  ! ' + fl)
             if act and act['marks']:

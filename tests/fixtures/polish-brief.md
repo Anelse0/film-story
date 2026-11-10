@@ -7,11 +7,16 @@
 - **对白**：口语。
 
 ### 锁定的台词（逐字）
-- S01 > I know.
+- S01 > Still works.
 - S02 > "Morning."
 - S10 > One more round.
 
+### 指定改法（逐字照办）
+- S01 > Night. → Good night.（说得太短，像在赶人）
+- S02 > Morning. -> Morning, you.
+
 ## 4. 逐场
+
 
 | 场 | 这一轮 | 保留 | 改 / 删 / 考虑 | 结果 |
 |---|---|---|---|---|

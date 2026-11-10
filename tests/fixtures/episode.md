@@ -4,7 +4,7 @@
 承接：无
 新事实（提案）：无
 
-状态：探索稿（写到 S02）
+状态：初稿 · 写到 S02
 
 本版改动（相对 v0.1；本轮目标：测试；依据："测试"）：
 - S02 加：> Morning.
@@ -16,11 +16,11 @@
 The overhead light hums.
 
 **DEV**
-You're really good at this.
-你真的很会这个。
+You kept the old sign.
+你还留着旧招牌。
 
 **MARA**
-I know.
+Still works.
 
 ## EXT. STREET - CONTINUOUS
 

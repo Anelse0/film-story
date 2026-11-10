@@ -1,6 +1,7 @@
 """检查脚本回归：正文边界、台词块、语言、画内 / 画外、制作参数、表面线索的命名、约束检查只查正文（0.6.0）；
 标准剧本格式的 Markdown、动作描写线索、Fountain / Markdown / 标准版面互转（0.7.1）。
-场标记与按场取出（0.7.2）；比稿：结构有没有变、改了哪些句子（0.7.3）。
+场标记与按场取出（0.7.2）；比稿：结构有没有变、改了哪些句子，带精修简报核对锁定的台词（0.7.3）；
+表演线索、占位符、指定改法，场标记分场与场号归一（0.7.4）。
 夹具在 tests/fixtures/；每个用例先把夹具复制到临时目录，免得往上找到真实项目的 story/constraints.md。"""
 import shutil
 import subprocess
@@ -14,6 +15,10 @@ SCRIPTS = ROOT / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 import check_dialogue as cd  # noqa: E402
 from project_config import load_constraints  # noqa: E402
+
+
+def scenes_of(path, lang='auto'):
+    return cd.parse(path, lang)[0]
 
 
 class Base(unittest.TestCase):
@@ -33,7 +38,7 @@ class Base(unittest.TestCase):
         return r.stdout
 
     def texts(self, path, lang='auto'):
-        return [x['text'] for sc in cd.extract(path, lang) for x in sc['lines']]
+        return [x['text'] for sc in scenes_of(path, lang) for x in sc['lines']]
 
 
 class BodyBounds(Base):
@@ -62,13 +67,13 @@ class Blocks(Base):
             'Rhett.', "Yeah. That should've been an easy question. But I guess I couldn't always tell what was real."])
 
     def test_blank_lines_between_cue_paren_and_line(self):
-        lines = cd.extract(self.fx / 'loose.md')[0]['lines']
+        lines = scenes_of(self.fx / 'loose.md')[0]['lines']
         self.assertEqual([(x['speaker'], x['text']) for x in lines], [
             ('EZRA', 'That was really good.'), ('EVELYN', 'Hey. You came.'), ('June', 'Clothes— the chair.')])
         self.assertEqual(lines[0]['paren'], '（真心实意地，语气放松）')
 
     def test_inline_labels_and_scene_heading(self):
-        scenes = cd.extract(self.fx / 'inline.md')
+        scenes = scenes_of(self.fx / 'inline.md')
         self.assertEqual(scenes[0]['title'], '07｜内景 June 家／Vera 工作室—7:02 PM')
         self.assertEqual([x['speaker'] for x in scenes[0]['lines']], ['June', 'Vera', 'June'])
 
@@ -97,7 +102,7 @@ class Language(Base):
 
 class Offscreen(Base):
     def test_phone_voices_are_offscreen(self):
-        lines = cd.extract(self.fx / 'phone.md')[0]['lines']
+        lines = scenes_of(self.fx / 'phone.md')[0]['lines']
         self.assertEqual([(x['speaker'], x['offscreen']) for x in lines],
                          [('JO', True), ('THEO', False), ('HOLLIS', True), ('THEO', False)])
 
@@ -137,16 +142,21 @@ class Labels(Base):
         self.assertNotIn('精准', out)
 
     def test_question_share_flag(self):
-        r = cd.analyse(cd.extract(self.fx / 'questions.md')[0])
+        r = cd.analyse(scenes_of(self.fx / 'questions.md')[0])
         self.assertTrue(any(f.startswith('THEO 的 4 句里 4 句是问句') for f in r['flags']), r['flags'])
 
     def test_display_names(self):
-        sc = cd.extract(self.fx / 'questions.md')[0]
+        sc = scenes_of(self.fx / 'questions.md')[0]
         self.assertIn('DJ', cd.analyse(sc)['speakers'])
         self.assertIn('Theo', cd.analyse(sc, names={'theo': 'Theo'})['speakers'])
 
 
 class Constraints(Base):
+    def hole(self, text):
+        p = self.fx / 'hole.md'
+        p.write_text((self.fx / 'episode.md').read_text(encoding='utf-8').replace('One more.', text), encoding='utf-8')
+        return p
+
     def test_forbidden_word_outside_body_ignored(self):
         out = self.run_script('check_constraints.py', self.fx / 'body-annotations.md', '--constraints', self.cons)
         self.assertIn('禁用词（只查正文）：无', out)
@@ -164,6 +174,16 @@ class Constraints(Base):
         out = self.run_script('check_constraints.py', self.fx / 'unpaired.md', '--constraints', self.cons)
         self.assertIn('缺 本场改变了什么：、新事实（提案）：', out)
 
+    def test_placeholders_listed(self):
+        p = self.hole('[AGENCY] wants one more. See [the note](x) and [CANON: name].')
+        c = self.fx / 'ep-cons2.md'
+        c.write_text('## 人物\n- Dev, Mara\n', encoding='utf-8')
+        out = self.run_script('check_constraints.py', p, '--constraints', c)
+        self.assertIn('[AGENCY]', out)
+        self.assertIn('[CANON: name]', out)
+        self.assertNotIn('[the note]', out)
+        self.assertIn('占位符（锁稿前清零）：无', self.run_script('check_constraints.py', self.fx / 'episode.md', '--constraints', c))
+
     def test_no_built_in_name_exemptions(self):
         c = self.fx / 'only-jo.md'
         c.write_text('## 人物\n- Jo\n', encoding='utf-8')
@@ -180,7 +200,7 @@ class StandardFormat(Base):
         self.assertEqual([sc['title'] for sc in scenes], ['INT. KITCHEN - NIGHT'])
         lines = scenes[0]['lines']
         self.assertEqual([(x['speaker'], x['text'], x['offscreen']) for x in lines], [
-            ('DEV', "You're really good at this.", False), ('MARA', 'I know.', False), ('MARA', 'Told you.', True)])
+            ('DEV', "You kept the old sign.", False), ('MARA', 'Still works.', False), ('MARA', 'Told you.', True)])
         self.assertEqual(lines[2]['paren'], '(V.O.) (laughing)')
         action = [t for _, t in scenes[0]['action']]
         for kept in ('Pull back: two stools, one of them empty.', 'The note on the fridge reads: "BACK AT TEN."',
@@ -213,10 +233,6 @@ class StandardFormat(Base):
         meta, rs = cd.report(self.fx / 'no-markers.md')
         self.assertNotIn('action', rs[0])
 
-    def test_old_export_with_blank_after_cue_still_read(self):
-        # 全文的角色名后面都空一行的旧导出稿：照旧算角色名
-        self.assertEqual([x['speaker'] for x in cd.extract(self.fx / 'loose.md')[0]['lines']], ['EZRA', 'EVELYN', 'June'])
-
 
 class EpisodeFile(Base):
     """一集一个文件：每场开头一行场标记，一场可以有几个场景标题。"""
@@ -234,6 +250,35 @@ class EpisodeFile(Base):
         out = self.run_script('check_dialogue.py', self.fx / 'episode.md', '--wps', '4')
         self.assertIn('-- [S01 · THE BAR] EXT. STREET - CONTINUOUS', out)
         self.assertIn('S01 · THE BAR：台词 3 句 · 8 词 · 约 2 s', out)
+
+    def test_marker_starts_a_scene_and_any_h2_is_a_heading(self):
+        p = self.fx / 'zh-episode.md'
+        p.write_text('# 测试 · 第一集\n\n<!-- script-body:start -->\n<!-- 场 01 · 厨房 -->\n## 内 · 厨房 · 夜\n\n妈妈停下手里的活，看着她。\n\n'
+                     '**妈妈**\n嗯，你又回来这么晚……\n\n（沉默）\n\n<!-- 场 02 · 门口 -->\n\n**女儿**\n我走了。\n\n## 外 · 楼道 · 夜\n\n灯坏了。\n'
+                     '<!-- script-body:end -->\n', encoding='utf-8')
+        scenes, meta = cd.parse(p)
+        self.assertEqual([(sc['mark'], sc['title']) for sc in scenes], [
+            ('场 01 · 厨房', '内 · 厨房 · 夜'), ('场 02 · 门口', '场 02 · 门口'), ('场 02 · 门口', '外 · 楼道 · 夜')])
+        self.assertEqual([x['speaker'] for sc in scenes for x in sc['lines']], ['妈妈', '女儿'])  # 场标记后面没跟标题，台词也归这一场
+        cues = cd.performance_cues(scenes[0])
+        self.assertEqual({k: cues[k] for k, _ in cd.PERF_KEYS}, {'stops': 1, 'beats': 1, 'looks': 1, 'fillers': 1, 'unfinished': 1})
+        self.assertEqual(cd.mark_label('场 01 · 厨房'), cd.mark_label('s1'))
+        out = self.run_script('render_screenplay.py', p, '--scene', 'S2')
+        self.assertIn('我走了。', out)
+        self.assertNotIn('回来这么晚', out)
+        self.assertNotIn('格式提示', out)  # "内 / 外 · 地点 · 时间"是中文稿的标准写法
+        brief = self.fx / 'zh-brief.md'
+        brief.write_text('### 锁定的台词\n- 场 02 > 我走了。\n- S01 > 我走了。\n', encoding='utf-8')
+        out = self.run_script('compare_drafts.py', p, '--brief', brief)
+        self.assertIn('⚠ 锁定的台词少了 1 句（共 2 句）：', out)
+        self.assertIn('- S01 > 我走了。', out)
+
+    def test_word_lists_skip_known_lookalikes(self):
+        p = self.fx / 'look.md'
+        p.write_text('<!-- script-body:start -->\n## INT. BAR - NIGHT\n\nPause.\n\nHe checks his watch.\n\n**DEV**\nDo you know where it is?\n\n'
+                     '**MARA**\nI mean, no.\n<!-- script-body:end -->\n', encoding='utf-8')
+        cues = cd.performance_cues(cd.parse(p)[0][0])
+        self.assertEqual({k: cues[k] for k, _ in cd.PERF_KEYS}, {'stops': 0, 'beats': 1, 'looks': 0, 'fillers': 1, 'unfinished': 0})
 
     def test_no_markers_no_totals(self):
         self.assertNotIn('按场合计', self.run_script('check_dialogue.py', self.fx / 'standard.md'))
@@ -256,11 +301,13 @@ class Render(Base):
         self.assertIn('场景标题 2 个 · 台词 3 段', msg)
         md = out.read_text(encoding='utf-8')
         for piece in ('# SAMPLE · Episode 1\n', 'Draft v0.1 · 2026-11-09\n', '<!-- script-body:start -->\n## INT. KITCHEN - NIGHT\n',
-                      "**DEV**\nYou're really good at this.\n", '### AT THE WINDOW\n', '**MARA (V.O.)**\n(laughing)\nTold you.\n',
+                      "**DEV**\nYou kept the old sign.\n", '### AT THE WINDOW\n', '**MARA (V.O.)**\n(laughing)\nTold you.\n',
                       '**THE NEXT MORNING**\n', '## KITCHEN, LATER\n', '**McAVOY**\nMorning.\n', 'FADE OUT.\n<!-- script-body:end -->'):
             self.assertIn(piece, md)
-        lines = cd.extract(out)[0]['lines']  # 转出来的 Markdown，检查脚本读得出同样的台词
-        self.assertEqual([(x['speaker'], x['offscreen']) for x in lines], [('DEV', False), ('MARA', True), ('McAVOY', False)])
+        scenes = scenes_of(out)  # 转出来的 Markdown，检查脚本读得出同样的台词，分场也和转换脚本一致
+        self.assertEqual([sc['title'] for sc in scenes], ['INT. KITCHEN - NIGHT', 'KITCHEN, LATER'])
+        self.assertEqual([(x['speaker'], x['offscreen']) for sc in scenes for x in sc['lines']],
+                         [('DEV', False), ('MARA', True), ('McAVOY', False)])
 
     def test_round_trip_keeps_every_line(self):
         md, back = self.tmp / 'out.md', self.tmp / 'back.fountain'
@@ -276,8 +323,8 @@ class Render(Base):
         self.assertIn(' ' * 20 + 'DEV', out)
         self.assertIn(' ' * 20 + 'MARA (V.O.)', out)
         self.assertIn(' ' * 15 + '(laughing)', out)
-        self.assertIn(' ' * 10 + "You're really good at this.", out)
-        self.assertIn(' ' * 10 + '你真的很会这个。', out)
+        self.assertIn(' ' * 10 + "You kept the old sign.", out)
+        self.assertIn(' ' * 10 + '你还留着旧招牌。', out)
         self.assertIn('AT THE WINDOW', out)
         self.assertIn(' ' * 53 + 'CUT TO:', out)  # 转场靠右，收在第 60 格
         self.assertIn(' ' * 22 + 'THE NEXT MORNING', out)  # 片名卡居中
@@ -292,7 +339,7 @@ class Render(Base):
 
     def test_no_translation(self):
         out = self.run_script('render_screenplay.py', self.fx / 'standard.md', '--no-translation')
-        self.assertNotIn('你真的很会这个。', out)
+        self.assertNotIn('你还留着旧招牌。', out)
         self.assertIn('对照翻译 2 行已去掉', out)
 
     def test_html_page_spec(self):
@@ -301,7 +348,7 @@ class Render(Base):
         h = page.read_text(encoding='utf-8')
         for piece in ('<title>SAMPLE</title>', '12pt/12pt "Courier Prime", "Courier New", Courier',
                       '@page { size: 8.5in 11in; margin: 1in 1in 1in 1.5in; }', '<p class="character">MARA (V.O.)</p>',
-                      '<p class="paren">(laughing)</p>', '<p class="alt">我知道。</p>', '<p class="scene">INT. KITCHEN - NIGHT</p>',
+                      '<p class="paren">(laughing)</p>', '<p class="alt">还能用。</p>', '<p class="scene">INT. KITCHEN - NIGHT</p>',
                       '<p class="transition">CUT TO:</p>', '<p class="center">THE NEXT MORNING</p>'):
             self.assertIn(piece, h)
 
@@ -315,9 +362,9 @@ class Render(Base):
         self.assertNotIn('S01', '\n'.join(self.run_script('render_screenplay.py', self.fx / 'episode.md').splitlines()[:-1]))
 
     def test_take_one_scene(self):
-        out = self.run_script('render_screenplay.py', self.fx / 'episode.md', '--scene', 's1')
-        self.assertIn('没有找到 s1。文件里的场：S01 · THE BAR、S02 · THE MORNING AFTER、S10 · LATER', out)
-        out = self.run_script('render_screenplay.py', self.fx / 'episode.md', '--scene', 'S01')
+        out = self.run_script('render_screenplay.py', self.fx / 'episode.md', '--scene', 'S7')
+        self.assertIn('没有找到 S7。文件里的场：S01 · THE BAR、S02 · THE MORNING AFTER、S10 · LATER', out)
+        out = self.run_script('render_screenplay.py', self.fx / 'episode.md', '--scene', 's1')  # s1、S01、场 1 是同一场，不是 S10
         self.assertIn('EXT. STREET - CONTINUOUS', out)  # 一场可以有几个场景标题
         self.assertNotIn('Morning.', out)
         self.assertNotIn('One more.', out)
@@ -325,11 +372,18 @@ class Render(Base):
         self.assertIn('对照翻译 1 行在内', out)
         md = self.tmp / 's02.md'
         self.run_script('render_screenplay.py', self.fx / 'episode.md', '--scene', 'S02,S10', '--md', md)
-        self.assertEqual([x['text'] for sc in cd.extract(md) for x in sc['lines']], ['Morning.', 'One more.'])
+        self.assertEqual([x['text'] for sc in scenes_of(md) for x in sc['lines']], ['Morning.', 'One more.'])
+
+    def test_title_of_old_file_without_markers(self):
+        p = self.fx / 'old.md'
+        p.write_text("# OLD · 场 01\n\n场 01 · 内 · 酒吧 · 夜\n\n**DEV**\nHi.\n", encoding='utf-8')
+        out = self.run_script('render_screenplay.py', p).splitlines()
+        self.assertIn('OLD · 场 01', out[0])  # 标题取到了
+        self.assertEqual(sum('OLD · 场 01' in l for l in out), 1)  # 没有再当成小标题排一遍
 
     def test_format_notes(self):
         out = self.run_script('render_screenplay.py', self.fx / 'body-annotations.md')
-        self.assertIn('格式提示：场景标题不是「INT. / EXT. 地点 - 时间」的有 1 处', out)
+        self.assertIn('格式提示：场景标题不是「INT. / EXT. 地点 - 时间」或「内 / 外 · 地点 · 时间」的有 1 处', out)
 
 
 class CompareDrafts(Base):
@@ -345,7 +399,7 @@ class CompareDrafts(Base):
         return p
 
     def polished(self):
-        return self.variant('polish.md', ("You're really good at this.", "You're good at this."), ('**DEV**\nNight.\n\n', ''),
+        return self.variant('polish.md', ("You kept the old sign.", "You kept the sign."), ('**DEV**\nNight.\n\n', ''),
                             ('Dev pours two coffees.', 'Dev pours two coffees and slides one across.'))
 
     def test_polish_leaves_structure_alone(self):
@@ -361,7 +415,7 @@ class CompareDrafts(Base):
     def test_report_gives_pasteable_change_list(self):
         out = self.run_script('compare_drafts.py', self.fx / 'episode.md', self.polished(), '--wps', '4')
         for piece in ('按场标记对齐（3 → 3 场）', '结构：场、场景标题、每场的说话人都没变。', '台词：5 → 4 句 · 改 1 · 删 1 · 加 0',
-                      "- S01 改：> You're really good at this. → > You're good at this.", '- S01 删：> Night.（DEV）',
+                      "- S01 改：> You kept the old sign. → > You kept the sign.", '- S01 删：> Night.（DEV）',
                       '- S02 改：> Dev pours two coffees. → > Dev pours two coffees and slides one across.'):
             self.assertIn(piece, out)
 
@@ -380,7 +434,7 @@ class CompareDrafts(Base):
         self.assertIn('没有场标记，按场景标题对齐（1 → 1 个）', out)
 
     def test_brief_locked_lines_and_declared_rewrite(self):
-        new = self.variant('v3.md', ('I know.', 'I know that.'),
+        new = self.variant('v3.md', ('Still works.', 'Still works fine.'),
                            ('**DEV**\nOne more.', '**NIA**\nOne more.\n\n## EXT. ALLEY - NIGHT\n\nRain.'))
         import compare_drafts as cmp
         r = cmp.compare(self.fx / 'episode.md', new, brief=self.fx / 'polish-brief.md')
@@ -388,15 +442,37 @@ class CompareDrafts(Base):
         self.assertEqual(len(r['declared']), 2)
         self.assertEqual(r['locked']['total'], 3)
         self.assertEqual([(x['scene'], x['text'], x['closest']) for x in r['locked']['missing']],
-                         [('S01', 'I know.', 'I know that.'), ('S10', 'One more round.', 'One more.')])
+                         [('S01', 'Still works.', 'Still works fine.'), ('S10', 'One more round.', 'One more.')])
         out = self.run_script('compare_drafts.py', self.fx / 'episode.md', new, '--brief', self.fx / 'polish-brief.md')
         for piece in ('结构：没登记的场，场、场景标题、每场的说话人都没变。', '登记了局部重写的场有结构变化（简报里写了，不算越界）：',
-                      '⚠ 锁定的台词少了 2 句（共 3 句）：', '- S01 > I know.（现在最接近的一句：I know that.）'):
+                      '⚠ 锁定的台词少了 2 句（共 3 句）：', '- S01 > Still works.（现在最接近的一句：Still works fine.）'):
             self.assertIn(piece, out)
+
+    def test_brief_named_edits(self):
+        import compare_drafts as cmp
+        self.assertEqual(cmp.read_brief(self.fx / 'polish-brief.md')[1],
+                         [('S01', 'Night.', 'Good night.'), ('S02', 'Morning.', 'Morning, you.')])
+        new = self.variant('named.md', ('**DEV**\nNight.', '**DEV**\nGood night.'))
+        out = self.run_script('compare_drafts.py', self.fx / 'episode.md', new, '--brief', self.fx / 'polish-brief.md')
+        self.assertIn('⚠ 指定改法有 1 处没改（共 2 处）：', out)
+        self.assertIn('- S02 > Morning, you.（旧句还在：Morning.）', out)
+        self.assertNotIn('S01 > Good night.（', out)
+
+    def test_performance_cues_before_and_after(self):
+        new = self.variant('perf.md', ('Dev pours two coffees.', 'Dev stops pouring. Beat.\n\nMara looks at him.'),
+                           ('**MARA**\nMorning.', '**MARA**\n(beat)\nUm, morning—'))
+        scenes, meta = cd.parse(new)
+        cues = cd.performance_cues(scenes[2])
+        self.assertEqual({k: cues[k] for k, _ in cd.PERF_KEYS}, {'stops': 1, 'beats': 2, 'looks': 1, 'fillers': 1, 'unfinished': 1})
+        out = self.run_script('check_dialogue.py', new)
+        self.assertIn('表演线索（只数不判）：停手 1 · 停顿 2 · 对视 1 · 填充词 1 · 没说完 1', out)
+        self.assertIn('停手 行', out)
+        out = self.run_script('compare_drafts.py', self.fx / 'episode.md', new)
+        self.assertIn('表演线索（只数不判）：停手 0 → 1 · 停顿 0 → 2 · 对视 0 → 1 · 填充词 0 → 1 · 没说完 0 → 1', out)
 
     def test_brief_alone_checks_locked_lines(self):
         out = self.run_script('compare_drafts.py', self.fx / 'episode.md', '--brief', self.fx / 'polish-brief.md')
-        self.assertIn('== 核对锁定的台词：episode.md ==', out)
+        self.assertIn('== 核对锁定的台词和指定改法：episode.md ==', out)
         self.assertIn('⚠ 锁定的台词少了 1 句（共 3 句）：', out)  # 带引号写的 "Morning." 也认
         self.assertIn('- S10 > One more round.', out)
         self.assertIn('找不到精修简报', self.run_script('compare_drafts.py', self.fx / 'episode.md', '--brief', self.fx / 'nope.md'))
@@ -409,6 +485,74 @@ class CompareDrafts(Base):
             self.assertIn(piece, out)
         self.assertNotIn('动作：', out)
 
+    def test_speaker_case_is_not_a_change(self):
+        new = self.variant('case.md', ('**MARA**\nStill works.', '**Mara**\nStill works.'))
+        out = self.run_script('compare_drafts.py', self.fx / 'episode.md', new)
+        self.assertIn('台词：5 → 5 句 · 改 0 · 删 0 · 加 0', out)
+        self.assertNotIn('本版改动', out)
+
+    def test_added_scene_and_reorder(self):
+        text = (self.fx / 'episode.md').read_text(encoding='utf-8')
+        s2 = text[text.index('<!-- S02'):text.index('<!-- S10')]
+        s10 = text[text.index('<!-- S10'):text.index('<!-- script-body:end -->')]
+        new = self.fx / 'moved.md'
+        new.write_text(text.replace(s2 + s10, s10 + '\n' + s2 + '<!-- S11 · CODA -->\n## INT. BAR - DAWN\n\nEmpty.\n'), encoding='utf-8')
+        out = self.run_script('compare_drafts.py', self.fx / 'episode.md', new)
+        self.assertIn('多了场：S11 · CODA', out)
+        self.assertIn('场的顺序变了：S01 → S10 → S02', out)
+
+    def test_brief_scene_numbers_and_strict_rewrite_rows(self):
+        import compare_drafts as cmp
+        brief = self.fx / 'b.md'
+        brief.write_text('### 锁定的台词\n- s1 > Still works.\n- 场 02 > Morning.\n- S07 > Hello.\n\n### 指定改法\n'
+                         '- S10 > One more. → Last one. (too flat)\n- S7 > A. → B.\n\n| 场 | 这一轮 | 保留 | 改 | 结果 |\n|---|---|---|---|---|\n'
+                         '| S01 · THE BAR | 小改 | | 不做局部重写 | |\n| S02 · X | 基本不动 | | | 建议下一轮局部重写 |\n'
+                         '| **S10** · LATER | 局部重写 | | | |\n', encoding='utf-8')
+        locked, edits, rewrite = cmp.read_brief(brief)
+        self.assertEqual(rewrite, {'10'})  # 只认第二栏正好写着"局部重写"的行
+        self.assertEqual(edits, [('S10', 'One more.', 'Last one.'), ('S7', 'A.', 'B.')])  # 半角括号里的原因也去掉
+        r = cmp.locked_only(self.fx / 'episode.md', brief)
+        self.assertEqual([(x['scene'], x['no_scene']) for x in r['locked']['missing']], [('S07', True)])
+        out = self.run_script('compare_drafts.py', self.fx / 'episode.md', '--brief', brief)
+        self.assertIn('- S07 > Hello.（剧本里没有这一场的场标记）', out)
+        self.assertIn('- S10 > Last one.（旧句还在：One more.）', out)
+        done = self.variant('done.md', ('One more.', 'Last one.'))
+        self.assertNotIn('S10 > Last one.', self.run_script('compare_drafts.py', done, '--brief', brief))
+        gone = self.variant('gone.md', ('One more.', 'Again.'))
+        self.assertIn('- S10 > Last one.（旧句也不在了，核对一下改成了什么）', self.run_script('compare_drafts.py', gone, '--brief', brief))
+
+    def test_brief_all_clear_and_empty(self):
+        brief = self.fx / 'ok.md'
+        brief.write_text('### 锁定的台词\n- S01 > Still works.\n\n### 指定改法\n- S02 > Hi. → Morning.\n', encoding='utf-8')
+        out = self.run_script('compare_drafts.py', self.fx / 'episode.md', '--brief', brief)
+        self.assertIn('锁定的台词：1 句逐字都在。', out)
+        self.assertIn('指定改法：1 处都改了。', out)
+        empty = self.fx / 'empty.md'
+        empty.write_text('# 精修简报\n', encoding='utf-8')
+        self.assertIn('锁定的台词：简报里没有列', self.run_script('compare_drafts.py', self.fx / 'episode.md', '--brief', empty))
+
+    def test_without_scene_markers_says_so(self):
+        text = (self.fx / 'episode.md').read_text(encoding='utf-8')
+        bare = self.fx / 'bare.md'
+        bare.write_text('\n'.join(l for l in text.splitlines() if not l.startswith('<!-- S')) + '\n', encoding='utf-8')
+        out = self.run_script('compare_drafts.py', bare, bare, '--brief', self.fx / 'polish-brief.md')
+        self.assertIn('没有场标记，按场景标题对齐（4 → 4 个）', out)
+        self.assertIn('认不出简报里登记了局部重写的场', out)
+        self.assertIn('锁定的台词和指定改法在全文里找，不分场', out)
+        part = self.variant('part.md', ('<!-- S01 · THE BAR -->\n', ''))
+        self.assertIn('不是每个场景标题前都有场标记，按场景标题对齐', self.run_script('compare_drafts.py', part, part))
+        out = self.run_script('compare_drafts.py', self.fx / 'no-markers.md', self.fx / 'no-markers.md')
+        self.assertIn('有一版没有正文标记，按全文读', out)
+
+    def test_json_output(self):
+        import json
+        out = self.run_script('compare_drafts.py', self.fx / 'episode.md', self.polished(), '--json', '--brief', self.fx / 'polish-brief.md')
+        r = json.loads(out)
+        self.assertEqual(r['marks'], 'all')
+        self.assertEqual(r['structure'], [])
+        self.assertEqual(r['performance']['new']['stops'], 0)
+        self.assertEqual(r['locked']['total'], 3)
+
     def test_against_git_revision(self):
         if not shutil.which('git'):
             self.skipTest('没有 git')
@@ -419,10 +563,13 @@ class CompareDrafts(Base):
         git = ['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@example.com']
         for args in (['init', '-q'], ['add', 'ep.md'], ['commit', '-q', '-m', 'v0.1']):
             subprocess.run(git + args, check=True, capture_output=True)
-        script.write_text(script.read_text(encoding='utf-8').replace('I know.', 'I know that.'), encoding='utf-8')
+        script.write_text(script.read_text(encoding='utf-8').replace('Still works.', 'Still works fine.'), encoding='utf-8')
         out = self.run_script('compare_drafts.py', script, '--rev', 'HEAD')
         self.assertIn('== 比稿：HEAD:ep.md → ep.md ==', out)
-        self.assertIn('- S01 改：> I know. → > I know that.', out)
+        self.assertIn('- S01 改：> Still works. → > Still works fine.', out)
+        out = self.run_script('compare_drafts.py', script, '--rev', 'HEAD', '--brief', self.fx / 'polish-brief.md')  # 交付时的用法
+        self.assertIn('⚠ 锁定的台词少了 2 句（共 3 句）：', out)
+        self.assertIn('- S01 > Still works.（现在最接近的一句：Still works fine.）', out)
         self.assertIn('git 里没有 HEAD~5:ep.md', self.run_script('compare_drafts.py', script, '--rev', 'HEAD~5'))
         self.assertIn('不在 git 仓库里', self.run_script('compare_drafts.py', self.fx / 'episode.md', '--rev', 'HEAD'))
 

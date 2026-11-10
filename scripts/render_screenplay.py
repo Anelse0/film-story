@@ -26,6 +26,7 @@ COLS = {'action': (0, 60), 'scene': (0, 60), 'sub': (0, 60), 'character': (20, 3
         'dialogue': (10, 35), 'alt': (10, 35)}
 PAGE_LINES = 55
 FOUNTAIN_SCENE = re.compile(r'^(?:INT\./EXT|INT/EXT|INT|EXT|EST|I/E)[. ]', re.I)
+STANDARD_HEAD = re.compile(r'^(?:(?:INT\./EXT|INT/EXT|INT|EXT|EST|I/E)\.? .+ - .+|(?:内|外|内外)\s*·\s*.+\s*·\s*.+)', re.I)
 TITLE_KEY = re.compile(r'^([A-Za-z][A-Za-z ]*):\s*(.*)$')
 MD_HEADING = re.compile(r'^(#{1,6})\s+(.+?)\s*#*$')
 BOLD_LINE = re.compile(r'^\*\*([^*]+)\*\*$')
@@ -44,22 +45,23 @@ def _is_caps(s):
 # ---------- 读 ----------
 
 def read_markdown(path):
-    """场景稿（Markdown）→ (标题信息, 元素列表)。规则与 check_dialogue.parse 一致。"""
+    """剧本文件（Markdown）→ (标题信息, 元素列表)。分场和认角色名的规则与 check_dialogue.parse 一致。
+    标题取正文标记之前的第一个一级标题；没有正文标记的旧稿取全文第一个一级标题，那一行不再排进正文。"""
     src = Path(path).read_text(encoding='utf-8').splitlines()
-    body, _ = cd.body_lines(src)
-    first = next((i for i, l in enumerate(src) if cd.START.search(l) or cd.END.search(l)), 0)
-    title = {}
-    for l in src[:first]:
+    body, note = cd.body_lines(src)
+    first = next((i for i, l in enumerate(src) if cd.START.search(l) or cd.END.search(l)), len(src))
+    title, title_no = {}, None
+    for k, l in enumerate(src[:first]):
         m = re.match(r'^#\s+(.+)', l)
         if m:
-            title['Title'] = [m.group(1).strip()]
+            title['Title'], title_no = [m.group(1).strip()], k + 1
             break
     tight, els, i, n = cd.has_tight_cue(body), [], 0, len(body)
     while i < n:
         no, raw = body[i]
         s = raw.strip()
         i += 1
-        if not s:
+        if not s or (note == 'no-markers' and no == title_no):
             els.append(('blank', ''))
             continue
         if s.startswith('<!--'):
@@ -71,8 +73,8 @@ def read_markdown(path):
             els.append(('scene', s.lstrip('#').strip()))
             continue
         m = MD_HEADING.match(s)
-        if m:  # 二级标题是场景标题（不以 INT. / EXT. 开头的也算），更深的是场内小标题
-            els.append(('scene' if len(m.group(1)) == 2 else 'sub', m.group(2)))
+        if m:  # 有正文标记的文件里，二级标题都是场景标题（不以 INT. / EXT. 开头的也算）；更深的是场内小标题
+            els.append(('scene' if len(m.group(1)) == 2 and note != 'no-markers' else 'sub', m.group(2)))
             continue
         if cd.TRANSITION.match(s):
             els.append(('transition', s.lstrip('> ')))
@@ -382,9 +384,9 @@ def to_html(title, paras, lang='en'):
 def format_notes(paras):
     """格式提示：只报和标准格式不一样的地方，不改。"""
     notes = []
-    odd = [l[0][1] for k, l in paras if k == 'scene' and not re.match(r'^(?:INT\./EXT|INT/EXT|INT|EXT|EST|I/E)\.? .+ - .+', l[0][1], re.I)]
+    odd = [l[0][1] for k, l in paras if k == 'scene' and not STANDARD_HEAD.match(l[0][1])]
     if odd:
-        notes.append(f"场景标题不是「INT. / EXT. 地点 - 时间」的有 {len(odd)} 处（照原样排）：{'；'.join(odd[:3])}")
+        notes.append(f"场景标题不是「INT. / EXT. 地点 - 时间」或「内 / 外 · 地点 · 时间」的有 {len(odd)} 处（照原样排）：{'；'.join(odd[:3])}")
     low = sorted({l[0][1] for k, l in paras if k == 'speech' and not _is_caps(l[0][1]) and not cd.CJK.search(l[0][1])})
     if low:
         notes.append(f"角色名不是全大写：{'、'.join(low[:6])}")

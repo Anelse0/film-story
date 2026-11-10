@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """项目约束文件（film-story）：找 <项目>/story/constraints.md，读人物、地点、禁用词、必填头部、同框上限和制作参数。
 
-两个检查脚本共用。约束文件格式见 templates/constraints.md：各节标题以"## 人物 / 地点 / 禁用 / 必填 / 同框 / 制作参数"开头；
+检查脚本和比稿脚本共用。约束文件格式见 templates/constraints.md：各节标题以"## 人物 / 地点 / 禁用 / 必填 / 同框 / 制作参数"开头；
 "制作参数"一节每行写成"英文语速：4 词/秒""中文语速：4 字/秒""单条生成上限：30 s"，冒号后先写数字，留空就是没配置。"""
 import re
 from pathlib import Path
@@ -12,7 +12,7 @@ RATE_KEYS = (('英文语速', 'wps'), ('中文语速', 'cps'), ('单条生成上
 
 
 def find_constraints(scene_path):
-    """从场景文件所在目录往上找 story/constraints.md；找不到返回 None。"""
+    """从剧本文件所在目录往上找 story/constraints.md；找不到返回 None。"""
     d = Path(scene_path).resolve().parent
     for p in [d] + list(d.parents):
         c = p / 'story' / 'constraints.md'
