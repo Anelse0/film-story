@@ -1,5 +1,6 @@
 """检查脚本回归：正文边界、台词块、语言、画内 / 画外、制作参数、表面线索的命名、约束检查只查正文（0.6.0）；
 标准剧本格式的 Markdown、动作描写线索、Fountain / Markdown / 标准版面互转（0.7.1）。
+场标记与按场取出（0.7.2）；比稿：结构有没有变、改了哪些句子（0.7.3）。
 夹具在 tests/fixtures/；每个用例先把夹具复制到临时目录，免得往上找到真实项目的 story/constraints.md。"""
 import shutil
 import subprocess
@@ -329,6 +330,101 @@ class Render(Base):
     def test_format_notes(self):
         out = self.run_script('render_screenplay.py', self.fx / 'body-annotations.md')
         self.assertIn('格式提示：场景标题不是「INT. / EXT. 地点 - 时间」的有 1 处', out)
+
+
+class CompareDrafts(Base):
+    """compare_drafts.py：两版剧本的结构有没有变（场、场景标题、每场的说话人），改了哪些句子。"""
+
+    def variant(self, name, *swaps):
+        text = (self.fx / 'episode.md').read_text(encoding='utf-8')
+        for a, b in swaps:
+            self.assertIn(a, text)
+            text = text.replace(a, b)
+        p = self.fx / name
+        p.write_text(text, encoding='utf-8')
+        return p
+
+    def polished(self):
+        return self.variant('polish.md', ("You're really good at this.", "You're good at this."), ('**DEV**\nNight.\n\n', ''),
+                            ('Dev pours two coffees.', 'Dev pours two coffees and slides one across.'))
+
+    def test_polish_leaves_structure_alone(self):
+        import compare_drafts as cmp
+        r = cmp.compare(self.fx / 'episode.md', self.polished(), wps=4)
+        self.assertTrue(r['by_mark'])
+        self.assertEqual(r['structure'], [])
+        self.assertEqual([(x['scene'], x['kind'], x['what']) for x in r['items']],
+                         [('S01', '改', 'line'), ('S01', '删', 'line'), ('S02', '改', 'para')])
+        self.assertEqual((r['old_total'][0], r['new_total'][0]), (5, 4))
+        self.assertEqual(r['scenes'][0]['seconds'], [2.0, 1.5])
+
+    def test_report_gives_pasteable_change_list(self):
+        out = self.run_script('compare_drafts.py', self.fx / 'episode.md', self.polished(), '--wps', '4')
+        for piece in ('按场标记对齐（3 → 3 场）', '结构：场、场景标题、每场的说话人都没变。', '台词：5 → 4 句 · 改 1 · 删 1 · 加 0',
+                      "- S01 改：> You're really good at this. → > You're good at this.", '- S01 删：> Night.（DEV）',
+                      '- S02 改：> Dev pours two coffees. → > Dev pours two coffees and slides one across.'):
+            self.assertIn(piece, out)
+
+    def test_structure_changes_are_named(self):
+        new = self.variant('rewrite.md', ('<!-- S02 · THE MORNING AFTER -->\n## INT. KITCHEN - MORNING\n\n**MARA**\nMorning.\n\nDev pours two coffees.\n\n', ''),
+                           ('**DEV**\nOne more.', '**NIA**\nOne more.\n\n## EXT. ALLEY - NIGHT\n\nRain.'))
+        out = self.run_script('compare_drafts.py', self.fx / 'episode.md', new)
+        for piece in ('结构变了', '少了场：S02 · THE MORNING AFTER', 'S10：场景标题 1 → 2（多了 EXT. ALLEY - NIGHT）',
+                      'S10：说话人少了 DEV；多了 NIA'):
+            self.assertIn(piece, out)
+
+    def test_same_file_and_no_markers(self):
+        out = self.run_script('compare_drafts.py', self.fx / 'episode.md', self.fx / 'episode.md')
+        self.assertIn('两版的台词和动作一字未改。', out)
+        out = self.run_script('compare_drafts.py', self.fx / 'standard.md', self.fx / 'standard.md')
+        self.assertIn('没有场标记，按场景标题对齐（1 → 1 个）', out)
+
+    def test_brief_locked_lines_and_declared_rewrite(self):
+        new = self.variant('v3.md', ('I know.', 'I know that.'),
+                           ('**DEV**\nOne more.', '**NIA**\nOne more.\n\n## EXT. ALLEY - NIGHT\n\nRain.'))
+        import compare_drafts as cmp
+        r = cmp.compare(self.fx / 'episode.md', new, brief=self.fx / 'polish-brief.md')
+        self.assertEqual(r['structure'], [])  # S10 登记了局部重写，结构变化不算越界
+        self.assertEqual(len(r['declared']), 2)
+        self.assertEqual(r['locked']['total'], 3)
+        self.assertEqual([(x['scene'], x['text'], x['closest']) for x in r['locked']['missing']],
+                         [('S01', 'I know.', 'I know that.'), ('S10', 'One more round.', 'One more.')])
+        out = self.run_script('compare_drafts.py', self.fx / 'episode.md', new, '--brief', self.fx / 'polish-brief.md')
+        for piece in ('结构：没登记的场，场、场景标题、每场的说话人都没变。', '登记了局部重写的场有结构变化（简报里写了，不算越界）：',
+                      '⚠ 锁定的台词少了 2 句（共 3 句）：', '- S01 > I know.（现在最接近的一句：I know that.）'):
+            self.assertIn(piece, out)
+
+    def test_brief_alone_checks_locked_lines(self):
+        out = self.run_script('compare_drafts.py', self.fx / 'episode.md', '--brief', self.fx / 'polish-brief.md')
+        self.assertIn('== 核对锁定的台词：episode.md ==', out)
+        self.assertIn('⚠ 锁定的台词少了 1 句（共 3 句）：', out)  # 带引号写的 "Morning." 也认
+        self.assertIn('- S10 > One more round.', out)
+        self.assertIn('找不到精修简报', self.run_script('compare_drafts.py', self.fx / 'episode.md', '--brief', self.fx / 'nope.md'))
+
+    def test_dialogue_only_for_language_versions(self):
+        zh = self.variant('zh.md', ('The overhead light hums.', '头顶的灯嗡嗡响。'), ('Dev pours two coffees.', 'Dev 倒了两杯咖啡。'),
+                          ('## EXT. STREET - CONTINUOUS', '## 外 · 街上 · 接上'))
+        out = self.run_script('compare_drafts.py', self.fx / 'episode.md', zh, '--dialogue-only')
+        for piece in ('只比对白', '结构：场、每场的说话人都没变。', '台词：5 → 5 句 · 改 0 · 删 0 · 加 0', '两版的台词一字未改。'):
+            self.assertIn(piece, out)
+        self.assertNotIn('动作：', out)
+
+    def test_against_git_revision(self):
+        if not shutil.which('git'):
+            self.skipTest('没有 git')
+        repo = self.tmp / 'repo'
+        repo.mkdir()
+        script = repo / 'ep.md'
+        shutil.copy(self.fx / 'episode.md', script)
+        git = ['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@example.com']
+        for args in (['init', '-q'], ['add', 'ep.md'], ['commit', '-q', '-m', 'v0.1']):
+            subprocess.run(git + args, check=True, capture_output=True)
+        script.write_text(script.read_text(encoding='utf-8').replace('I know.', 'I know that.'), encoding='utf-8')
+        out = self.run_script('compare_drafts.py', script, '--rev', 'HEAD')
+        self.assertIn('== 比稿：HEAD:ep.md → ep.md ==', out)
+        self.assertIn('- S01 改：> I know. → > I know that.', out)
+        self.assertIn('git 里没有 HEAD~5:ep.md', self.run_script('compare_drafts.py', script, '--rev', 'HEAD~5'))
+        self.assertIn('不在 git 仓库里', self.run_script('compare_drafts.py', self.fx / 'episode.md', '--rev', 'HEAD'))
 
 
 if __name__ == '__main__':

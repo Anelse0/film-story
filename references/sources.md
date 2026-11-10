@@ -4,7 +4,7 @@
 
 来源：《film-story 0.6.0 专业创作实务调研与升级方案》（2026-10-24，作者本地，不随仓库分发；基线为本仓库 0.5.0）。同日审阅抽查了其中 10 条访谈与方法出处，依据是网页摘要与短摘录。
 
-**证据类型**：创作者回忆（访谈、讲座、注释，属本人对过程的回顾）/ 稿件对照（公开的前后稿可以互相比对）/ 本 skill 的稿面分析（对公开稿件的解读，不是作者说明的动机）/ 产品文档。
+**证据类型**：创作者回忆（访谈、讲座、注释，属本人对过程的回顾）/ 稿件对照（公开的前后稿可以互相比对）/ 本 skill 的稿面分析（对公开稿件的解读，不是作者说明的动机）/ 产品文档 / 行业协议原文。
 
 **复核**：核实 = 10-24 抽查与方案一致；部分核实 = 抽查后按原文改了措辞或范围；未复核 = 抽查时打不开，方法保留、引用时加注；沿用 = 沿用方案的复核，本次未抽查。
 
@@ -193,6 +193,16 @@
 | Tony Gilroy | 2024 WGAE Ian McLellan Hunter 职业成就奖 | https://www.wgaeast.org/2024-writers-guild-awards-winners-announced/ |
 | Aaron Sorkin | 2011 奥斯卡改编剧本《The Social Network》 | https://www.oscars.org/oscars/ceremonies/2011/0--9 |
 | David Fincher | 2011 BAFTA 最佳导演《The Social Network》 | https://www.bafta.org/awards/film/?award-year=2011 |
+
+## 阶段
+
+### 重写与精修的分界（WGA 基本协议）
+- 出处：Writers Guild of America 2014 Theatrical and Television Basic Agreement，Article 1（Definitions）— https://www.wga.org/uploadedfiles/contracts/MBA14.pdf
+- 类型：行业协议原文
+- 支持：重写（rewrite）指对剧本的情节、故事线或人物之间的关系作重大改动；精修（polish）指对对白、旁白或动作的改动，不包括重写；初稿（first draft screenplay）指第一份按顺序连成、含完整对白的完整稿。电影和电视两节的定义相同。
+- 不支持：这是计酬用的定义，不规定创作流程的先后。"精修是最后一轮""简报先行"是本 skill 的设计。
+- 用在：`polish.md` §1；SKILL.md §2 的阶段表
+- 复核：核实（2026-11-10 对原 PDF 的文字）
 
 ## 工具
 

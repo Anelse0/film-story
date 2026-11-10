@@ -356,9 +356,14 @@ def display_width(t):
     return sum(2 if unicodedata.east_asian_width(c) in 'WF' else 1 for c in t)
 
 
-def action_cues(scene):
-    """动作描写的表面线索：段数、最长一段折合标准版面几行、看不见的心理词、最长一串中间没有动作段的对白。
-    表格行、列表、引用和小标题不算动作描写。"""
+def mark_label(text):
+    """场标记开头的场号，去空格、不分大小写："S03 · THE BAR" → "s03"，"场 03 · 餐厅" → "场03"。"""
+    m = re.match(r'(?:S|场\s*)\d+[a-z]?', text.strip(), re.I)
+    return re.sub(r'\s+', '', m.group(0) if m else text).casefold()
+
+
+def action_paragraphs(scene):
+    """动作描写按段：[[(行号, 文字), …], …]。连着的几行是一段；表格行、列表、引用和小标题不算动作描写。"""
     plain = [(no, re.sub(r'\*+', '', t)) for no, t in scene['action'] if not t.startswith(('|', '#', '- ', '>'))]
     paras = []
     for no, t in plain:
@@ -366,6 +371,13 @@ def action_cues(scene):
             paras[-1].append((no, t))
         else:
             paras.append([(no, t)])
+    return paras
+
+
+def action_cues(scene):
+    """动作描写的表面线索：段数、最长一段折合标准版面几行、看不见的心理词、最长一串中间没有动作段的对白。"""
+    paras = action_paragraphs(scene)
+    plain = [x for para in paras for x in para]
     sizes = [(para[0][0], math.ceil(sum(display_width(t) for _, t in para) / ACTION_COLS)) for para in paras]
     marks = []
     for no, t in plain:

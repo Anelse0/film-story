@@ -193,10 +193,7 @@ def mark_translation(els):
     return out, primary
 
 
-def mark_label(text):
-    """场标记开头的场号，去空格、不分大小写："S03 · THE BAR" → "s03"，"场 03 · 餐厅" → "场03"。"""
-    m = re.match(r'(?:S|场\s*)\d+[a-z]?', text.strip(), re.I)
-    return re.sub(r'\s+', '', m.group(0) if m else text).casefold()
+mark_label = cd.mark_label
 
 
 def paragraphs(els, translation=True, scenes=None):
