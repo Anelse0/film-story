@@ -196,13 +196,14 @@
 
 ## 工具
 
-依据是产品文档，不据此推断行业使用比例；本 skill 的字段与这些工具相似，不等于已经和它们对接。Marion 的访谈能支持她用 Final Draft。复核：沿用。
+依据是产品文档，不据此推断行业使用比例；本 skill 的字段与这些工具相似，不等于已经和它们对接。Marion 的访谈能支持她用 Final Draft。复核：沿用；标"11-09 核实"的两行是 2026-11-09 对原页核对的。
 
 | 工具 | 已核实的能力 | 本 skill 的对应 |
 |---|---|---|
 | 纸卡、软木板（John August 的卡片方法 — https://johnaugust.com/2003/index-cards） | 一场或一段一张卡；并非所有项目都用卡片 | 场次表；不强制每次补完整大纲 |
-| Final Draft — https://www.finaldraft.com/products/features/ | Beat Board、大纲工具、备选对白、修订与制作功能 | 版本栏、本版改动、备选台词（`templates/scene-header.md`） |
+| Final Draft — https://www.finaldraft.com/products/features/ | Beat Board、大纲工具、备选对白、修订与制作功能 | 版本栏、本版改动、备选台词（`templates/screenplay.md`） |
 | WriterDuet — https://www.writerduet.com/article/416-a-guide-to-effortless-co-writing-in-writerduet | 行内评论与回复、行历史、按作者识别修订 | 批注锚定场号与版本，保留提出者、理由和处理结果 |
 | Highland Pro — https://quoteunquoteapps.com/highland-pro/ | 场景导航、Shelf、修订工具 | 正文、备选与研究材料各有位置 |
 | Scriptation — https://help.scriptation.com/en/article/how-do-i-transfer-my-notes-1khpcd8/ | PDF 批注迁移到新稿，提示被改动或删除的关联文本 | 批注块随版本迁移（SKILL.md §4） |
-| Fountain — https://fountain.io/syntax/ | 公开的纯文本剧本格式：场景、人物、对白、双栏对白 | 导出推迟到后续版本（Fountain / FDX / PDF） |
+| Fountain — https://fountain.io/syntax/ | 公开的纯文本剧本格式。场景标题以 INT / EXT 等开头、前面空一行；角色名是全大写的一行，前面空一行、后面不空行，`@` 可强制；括注跟在角色名或对白后面；`>` 强制转场，`>文字<` 居中；场号写成 `#…#`；动作以外的元素行首缩进不计（11-09 核实） | `screenplay-format.md` §1 的元素规则；`scripts/render_screenplay.py` 读写 Fountain |
+| Final Draft 的格式说明 — https://www.finaldraft.com/learn/how-to-format-a-screenplay/ | Courier 12 pt；上边距 1 in、左边距约 1.5 in；对白左缩 1–1.5 in、右缩约 1.5 in，角色名比对白再缩约 1 in；括注少用；场景标题三项：INT. / EXT.、地点、时间（11-09 核实）。"一页约一分钟"原页只说版面便于按页数估时长，本 skill 当经验值用 | `screenplay-format.md` §5 的标准页；导出页的缩进取 1 in、1.5 in、2 in |

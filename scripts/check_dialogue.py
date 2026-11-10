@@ -7,13 +7,17 @@
 
 正文：只读 <!-- script-body:start --> 与 <!-- script-body:end --> 之间（可以有多段）；头部、本版改动、批注、备选台词
 在标记之外，不计入。没有标记的旧文件按全文读并提示；标记不成对时报格式问题，按能推断的范围读。
+一集一个文件时，每场开头的场标记 <!-- S03 · 名字 -->（或 <!-- 场 03 · 名字 -->）会带到输出里，文末按场合计台词量。
 
 识别四种写法（混用也行）：
-  1) **NAME** 单独一行，下面到空行为止是台词块（Offset 写法）；块里另一种语言的行算对照翻译
-  2) NAME：“台词”　（中文翻译：…）   （FAMILIARS 写法；只取引号内）
+  1) **NAME** 单独一行，下面到空行为止是台词块（标准剧本格式的 Markdown 写法，见 references/screenplay-format.md）；
+     块里另一种语言的行算对照翻译
+  2) NAME：“台词”　（中文翻译：…）   （只取引号内）
   3) NAME: line  /  NAME（提示）: line
-  4) 全大写 NAME 单独一行，下面到空行为止是台词（传统剧本）
+  4) 全大写 NAME 单独一行，下面到空行为止是台词（Fountain / 传统剧本）
 括号行 （…）/(…) 视为括注。角色名或括注里有 电话里 / 手机里 / 画外 / 旁白 / V.O. / O.S. 等的，算画外说话人。
+角色名后面要紧跟台词：后面空一行的加粗行或全大写行算片名卡、场内小标题或动作，不算角色名（全文的角色名后面都空一行的
+旧导出稿除外）。转场行（CUT TO: / FADE OUT.）不算动作也不算角色名。
 
 语言（--lang）：auto（默认：按全文多数台词的语言定，另一种算对照翻译）/ en / zh。中文统计句数、字数、问句、接话链
 （只按问号）和解释 / 复述 / 泛称开头 / "不是……而是……"四类词面线索；"与上一句实词重合"要分词，中文不支持，输出里写明。
@@ -22,8 +26,9 @@
 --wps / --cps 临时指定；都没有就只报词数 / 字数，不估秒，不提拆条。估的是口播时长，不是成片时长。
 
 输出每场：句数、说话人分布（画外单独标出）、词数或字数、连续接话、短句占比、问句过半的说话人、词面线索、括号里的
-情绪标签。所有阈值都是 [推论]，在 THRESH 里改。退出码恒为 0。"""
-import argparse, json, math, re, sys, statistics
+情绪标签；动作描写另给三条线索（只在有正文标记的文件上给）：一段折合标准版面几行、看不见的心理词、最长一串中间没有
+动作的对白。所有阈值都是 [推论]，在 THRESH 里改。退出码恒为 0。"""
+import argparse, json, math, re, sys, statistics, unicodedata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -37,20 +42,26 @@ THRESH = {
     'echo_overlap': 0.5,      # 与上一句实词重合 ≥50%（只算英文）
     'question_share': 0.5,    # 某人问句占其台词 ≥50%……
     'question_min': 3,        # ……且至少 3 句 → 提示"一直在问"
+    'action_lines_max': 4,    # 动作描写一段折合标准版面（一行 60 格）超过 4 行 → 提示"动作段偏长"
+    'dialogue_run': 8,        # 连续 ≥8 句对白中间没有一段动作 → 提示核对听的人有没有反应的位置
 }
+ACTION_COLS = 60              # 标准版面动作描写一行的格数（Courier 12 pt，左 1.5 in、右 1 in）
 
 START = re.compile(r'<!--\s*script-body:start\s*-->')
+SCENE_MARK = re.compile(r'^<!--\s*((?:S|场\s*)\d+[a-z]?\b.*?)\s*-->$', re.I)  # 场标记：<!-- S03 · 名字 -->
 END = re.compile(r'<!--\s*script-body:end\s*-->')
 CUE_BOLD = re.compile(r'^\*\*([^*]+?)\*\*\s*(（.*?）|\(.*?\))?\s*$')
 CUE_UPPER = re.compile(r'^([A-Z][A-Z0-9 .\'-]{1,30})\s*(（.*?）|\(.*?\))?\s*$')
 CUE_INLINE = re.compile(r'^([A-Za-z][A-Za-z .\'-]{0,30}|[一-鿿·]{1,8})\s*(（[^）]*）|\([^)]*\))?\s*[:：]\s*(.+)$')
 NAME_LEAD = re.compile(r'^([A-Za-z][A-Za-z.\'-]{1,30})()\s*[一-鿿][^：:]*[:：]\s*([“"].+)$')  # "June 在“墙”后面喊：“…”"
+NAME_SHAPED = re.compile(r"^[A-Z][A-Za-z.'-]*(?: [A-Z][A-Za-z.'-]*){0,3}$")  # Mara / Night Manager；"Pull back" 不是
 NAME_PAREN = re.compile(r'^(.*?)\s*(（[^）]*）|\([^)]*\))\s*$')
 PAREN_ONLY = re.compile(r'^[（(].*[)）]\s*$')
 QUOTED = re.compile(r'[“"]([^”"]+)[”"]')
 CJK = re.compile(r'[一-鿿]')
 FULLWIDTH = re.compile(r'[，。！？、；：（）《》]')
-SCENE_HEAD = re.compile(r'^(?:#+\s*)?(?:场\s*\d|SCENE\b|INT\.|EXT\.|冷开)|^#+\s*\d{1,3}\s*[｜|]', re.I)
+SCENE_HEAD = re.compile(r'^(?:#+\s*)?(?:场\s*\d|SCENE\b|INT\.|EXT\.|EST\.|I/E\b|冷开)|^#+\s*\d{1,3}\s*[｜|]', re.I)
+TRANSITION = re.compile(r"^(?:>\s*)?(?:[A-Z][A-Z .']*\bTO:|FADE (?:IN|OUT)\s*[.:]?|(?:FADE|(?:SMASH )?CUT) TO BLACK\.?)$")
 WORD = re.compile(r"[A-Za-z][A-Za-z'’-]*")
 OFFSCREEN = re.compile(r"电话里|电话那头|电话那边|手机里|屏幕里|视频里|画外|旁白|广播里|对讲机里|"
                        r"\bV\.?\s?O\.?(?![A-Za-z])|\bO\.?\s?[SC]\.?(?![A-Za-z])|filtered|over the phone|"
@@ -78,13 +89,16 @@ EXPLAIN_ZH = re.compile(r"因为|所以说|我的意思是|我想说的是|说�
 RECAP_ZH = re.compile(r"你刚才说|你刚刚说|你说过|我说过|你不是说|上次你|那天你|你还记得")
 APHORISM_ZH = re.compile(r"^(人啊|人这一辈子|有些人|有的人|这世上|生活就是|爱就是|所谓|说到底)")
 ANTITHESIS_ZH = [re.compile(p) for p in (r"不是[^，。！？]{1,20}[，,]?\s*而是", r"与其[^，。！？]{1,20}不如")]
+INNER_EN = re.compile(r"\b(feels?|felt|realizes?|realized|thinks?|wonders?|remembers?|knows?|knew|decides?|hopes?|"
+                      r"wishes|expects?|expected|understands?|wants? to)\b", re.I)
+INNER_ZH = re.compile(r"感到|觉得|心想|(?<!手)心里|内心|意识到|想起|明白了|后悔|暗自|不禁|仿佛在说|似乎在想|知道自己|决定")
 EMO_PAREN = re.compile(r"(?<!压)低声|[，,]\s*平[）)]|平静|冷冷|冷淡|讽刺|深情|愤怒|悲伤|激动|温柔|坚定|quietly|coldly|softly|sarcastic|"
                        r"angrily|bitterly|tenderly|firmly|calmly", re.I)
 HEADER_WORDS = {'承接', '后续', '版本', '状态', '依据', '位置', '标题', '场序', '人物', '服装说明', '声音', '气场', '设计取向', '主线', '说明', '来源', '注', '新事实', '新事实（提案）', '本场改变了什么', '改动清单', '连带影响', '本版改动', '本轮目标', '改', '删', '加', '备选', '批注', '上一版'}
 TAG = {'explain': '含解释性词语', 'recap': '含复述性词语', 'aphorism': '泛称 / 格言式开头',
        'antithesis': '反转句式', 'echo': '与上一句实词重合'}
 LANG_NAME = {'en': '英文', 'zh': '中文'}
-UNIT = {'en': '词', 'zh': '字'}
+UNIT_NAME = {'en': '词', 'zh': '字'}
 
 
 def body_lines(src):
@@ -147,7 +161,9 @@ def _speech(speaker, paren, no):
     return {'speaker': speaker, 'cue_paren': paren, 'parens': [], 'cand': {'en': [], 'zh': []}, 'first': '', 'no': no}
 
 
-def _inline(m, no):
+def _inline(m, no, strict=False):
+    """同一行的"角色名：台词"。strict：正文用的是角色名单独一行的写法时，西文名字要像名字、台词要带引号才算，
+    免得把带冒号的动作描写（Pull back: … / The sign reads: "…"）当成台词。"""
     spk, par, text = m.group(1).strip(), m.group(2) or '', m.group(3).strip()
     if spk in NON_SPEAKER:  # "汇合到：Vera：“…”" → Vera；"邮件：“…”" 是画面文字，不是台词
         m2 = CUE_INLINE.match(text) or NAME_LEAD.match(text)
@@ -155,6 +171,8 @@ def _inline(m, no):
             return None
         spk, par, text = m2.group(1).strip(), m2.group(2) or '', m2.group(3).strip()
     if CJK.search(spk) and (spk in HEADER_WORDS or not QUOTED.search(text)):
+        return None
+    if strict and not CJK.search(spk) and not (NAME_SHAPED.match(spk) and QUOTED.search(text)):
         return None
     q = QUOTED.findall(text)
     text = ' '.join(q) if q else text
@@ -183,7 +201,17 @@ def _take(sp, cur, no, t):
 
 
 def _block_end(t):
-    return SCENE_HEAD.match(t) or cue_of(t) or t.startswith('<!--')
+    return SCENE_HEAD.match(t) or TRANSITION.match(t) or cue_of(t) or t.startswith(('<!--', '#'))
+
+
+def has_tight_cue(body):
+    """正文里有没有"角色名下面紧跟台词"的写法。有，角色名后面空一行的加粗行 / 全大写行就不算角色名
+    （片名卡、场内小标题、SILENCE. 这类动作）；全文都空一行的旧导出稿照旧。"""
+    for k in range(len(body) - 1):
+        s, nxt = body[k][1].strip(), body[k + 1][1].strip()
+        if s and nxt and not SCENE_HEAD.match(s) and not TRANSITION.match(s) and cue_of(s) and not _block_end(nxt):
+            return True
+    return False
 
 
 def _tight_block(body, i, sp, cur):
@@ -218,33 +246,45 @@ def _loose_block(body, i, sp, cur):
 
 
 def _scene(title):
-    return {'title': title, 'lines': [], 'parens': [], 'action': [], 'speeches': [], 'headed': title != '(开头)'}
+    return {'title': title, 'mark': '', 'lines': [], 'parens': [], 'action': [], 'speeches': [],
+            'headed': title != '(开头)'}
 
 
 def parse(path, lang='auto'):
-    """返回 (场景列表, 元信息)。场景：{'title', 'lines', 'parens', 'action'}；lines 每句 {'speaker', 'text', 'paren',
+    """返回 (场景列表, 元信息)。场景（一个场景标题一段）：{'title', 'mark'（场标记）, 'lines', 'parens', 'action'}；lines 每句 {'speaker', 'text', 'paren',
     'raw_no', 'lang', 'offscreen'}。元信息：{'body', 'lang', 'other_lang_speeches', 'body_lines'}。"""
     src = Path(path).read_text(encoding='utf-8').splitlines()
     body, note = body_lines(src)
     scenes, cur = [], _scene('(开头)')
+    tight, mark = has_tight_cue(body), ''
     i, n = 0, len(body)
     while i < n:
         no, raw = body[i]
         s = raw.strip()
         i += 1
-        if not s or s.startswith('<!--'):
+        if not s:
+            continue
+        if s.startswith('<!--'):
+            m = SCENE_MARK.match(s)
+            if m:  # 场标记：后面的场景标题都属于这一场，直到下一个场标记
+                mark = m.group(1)
+                if not (cur['headed'] or cur['speeches'] or cur['parens'] or cur['action']):
+                    cur['mark'] = mark
             continue
         if SCENE_HEAD.match(s) and not CUE_INLINE.match(s):
             if cur['headed'] or cur['speeches'] or cur['parens'] or cur['action']:
                 scenes.append(cur)
             cur = _scene(s.lstrip('#').strip())
+            cur['mark'] = mark
+            continue
+        if TRANSITION.match(s):
             continue
         cue = cue_of(s)
-        if cue:
+        loose = i < n and not body[i][1].strip()
+        if cue and not (loose and tight):
             sp = _speech(cue[0], cue[1], no)
             if cue[1]:
                 cur['parens'].append(cue[1])
-            loose = i < n and not body[i][1].strip()
             i = (_loose_block if loose else _tight_block)(body, i, sp, cur)
             if sp['first']:
                 cur['speeches'].append(sp)
@@ -254,7 +294,7 @@ def parse(path, lang='auto'):
             continue
         m = CUE_INLINE.match(s)
         if m:
-            sp = _inline(m, no)
+            sp = _inline(m, no, tight)
             if sp:
                 if sp['cue_paren']:
                     cur['parens'].append(sp['cue_paren'])
@@ -311,14 +351,57 @@ def speaker_table(lines, names=None, lang='en'):
     return list(spk.values())
 
 
-def analyse(scene, lang='en', rates=None, names=None):
+def display_width(t):
+    """等宽版面上的格数：全角字符（中日韩文字、全角标点）算 2 格。"""
+    return sum(2 if unicodedata.east_asian_width(c) in 'WF' else 1 for c in t)
+
+
+def action_cues(scene):
+    """动作描写的表面线索：段数、最长一段折合标准版面几行、看不见的心理词、最长一串中间没有动作段的对白。
+    表格行、列表、引用和小标题不算动作描写。"""
+    plain = [(no, re.sub(r'\*+', '', t)) for no, t in scene['action'] if not t.startswith(('|', '#', '- ', '>'))]
+    paras = []
+    for no, t in plain:
+        if paras and no == paras[-1][-1][0] + 1:
+            paras[-1].append((no, t))
+        else:
+            paras.append([(no, t)])
+    sizes = [(para[0][0], math.ceil(sum(display_width(t) for _, t in para) / ACTION_COLS)) for para in paras]
+    marks = []
+    for no, t in plain:
+        words = sorted({m.group(0) for m in INNER_ZH.finditer(t)} | {m.group(0).lower() for m in INNER_EN.finditer(t)})
+        if words:
+            marks.append({'line': no, 'text': t, 'words': words})
+    L, nos = scene['lines'], [no for no, _ in plain]
+    run, best, span = 1, min(len(L), 1), None
+    for k in range(1, len(L)):
+        run = 1 if any(L[k - 1]['raw_no'] < no < L[k]['raw_no'] for no in nos) else run + 1
+        if run > best:
+            best, span = run, (L[k - run + 1]['raw_no'], L[k]['raw_no'])
+    return {'paras': len(paras), 'max_lines': max((k for _, k in sizes), default=0),
+            'long_paras': [(no, k) for no, k in sizes if k > THRESH['action_lines_max']],
+            'dialogue_run': best, 'run_span': span, 'marks': marks}
+
+
+def analyse(scene, lang='en', rates=None, names=None, action=True):
     rates = rates or {}
     L = scene['lines']
-    out = {'title': scene['title'], 'n_lines': len(L), 'lang': lang, 'flags': [], 'marked_lines': [],
-           'unsupported': ['与上一句实词重合（要分词）'] if lang == 'zh' else []}
+    out = {'title': scene['title'], 'mark': scene.get('mark', ''), 'n_lines': len(L), 'lang': lang, 'flags': [],
+           'marked_lines': [], 'unsupported': ['与上一句实词重合（要分词）'] if lang == 'zh' else []}
+    act = action_cues(scene) if action and scene.get('action') else None
+    if act:
+        out['action'] = act
+        if act['long_paras']:
+            where = '、'.join(f"行 {no}（约 {k} 行）" for no, k in act['long_paras'][:6])
+            more = f" 等 {len(act['long_paras'])} 段" if len(act['long_paras']) > 6 else ''
+            out['flags'].append(f"动作段偏长：{where}{more}。标准版面一行 {ACTION_COLS} 格，一段通常不超过 "
+                                f"{THRESH['action_lines_max']} 行；核对是不是几个画面写进了一段、或夹着说明，按画面拆段 [推论]")
+        if act['dialogue_run'] >= THRESH['dialogue_run']:
+            out['flags'].append(f"连续 {act['dialogue_run']} 句对白中间没有动作段（行 {act['run_span'][0]}–{act['run_span'][1]}）。"
+                                f"核对这一段里听的人有没有反应的位置；快速来回的戏保留（表面线索）[推论]")
     if not L:
         return out
-    unit = UNIT[lang]
+    unit = UNIT_NAME[lang]
     sizes = [size_of(x['text'], lang) for x in L]
     rate = rates.get('wps' if lang == 'en' else 'cps')
     out['total_size'] = sum(sizes)
@@ -407,12 +490,26 @@ def report(path, lang='auto', constraints=None, wps=None, cps=None):
     scenes, meta = parse(path, lang)
     rates, names, cfg, warn = project_settings(path, constraints, wps, cps)
     meta.update({'file': str(path), 'config': str(cfg) if cfg else None, 'rates': rates, 'warn': warn})
-    results = [analyse(sc, meta['lang'], rates, names) for sc in scenes] or [analyse(_empty(), meta['lang'], rates, names)]
+    act = meta['body'] != 'no-markers'  # 没有正文标记的旧文件按全文读，头部和笔记会混进来，不给动作描写线索
+    results = [analyse(sc, meta['lang'], rates, names, act) for sc in scenes] or [analyse(_empty(), meta['lang'], rates, names)]
     return meta, results
 
 
 def _empty():
-    return {'title': '(无内容)', 'lines': [], 'parens': [], 'action': []}
+    return {'title': '(无内容)', 'mark': '', 'lines': [], 'parens': [], 'action': []}
+
+
+def unit_totals(results):
+    """按场标记合计：[(场, 句数, 词数或字数, 秒数或 None)]。没有场标记返回空。"""
+    out = {}
+    for r in results:
+        if r.get('mark'):
+            t = out.setdefault(r['mark'], [0, 0, 0.0, False])
+            t[0] += r['n_lines']
+            t[1] += r.get('total_size', 0)
+            if r.get('est_seconds') is not None:
+                t[2], t[3] = t[2] + r['est_seconds'], True
+    return [(u, t[0], t[1], round(t[2], 1) if t[3] else None) for u, t in out.items()]
 
 
 def _rel(p):
@@ -462,7 +559,7 @@ def main():
         print(f"\n== {meta['file']} ==")
         print(describe(meta))
         for r in results:
-            print(f"-- {r['title']}")
+            print(f"-- {'[' + r['mark'] + '] ' if r.get('mark') else ''}{r['title']}")
             if not r['n_lines']:
                 other = meta['other_lang_speeches']
                 if other:
@@ -470,14 +567,24 @@ def main():
                     print(f"  没有识别到{LANG_NAME[meta['lang']]}台词；全文另有 {other} 段{LANG_NAME[o]}台词未计入（用 --lang {o} 统计）")
                 else:
                     print('  没有识别到台词行（安静戏，或写法未被识别）')
-                continue
-            sec = f" · 约 {r['est_seconds']} s" if r['est_seconds'] is not None else ''
-            print(f"  台词 {r['n_lines']} 句 · 共 {r['total_size']} {r['unit']}{sec} · 平均 {r['mean_size']} {r['unit']}/句 · 短句 {r['short_share']:.0%}")
-            for d in r['speakers'].values():
-                off = '（画外）' if d['offscreen'] else ''
-                print(f"    {d['name']}{off}: {d['lines']} 句, 平均 {d['mean']} {r['unit']}, 问句 {d['questions']}")
+            else:
+                sec = f" · 约 {r['est_seconds']} s" if r['est_seconds'] is not None else ''
+                print(f"  台词 {r['n_lines']} 句 · 共 {r['total_size']} {r['unit']}{sec} · 平均 {r['mean_size']} {r['unit']}/句 · 短句 {r['short_share']:.0%}")
+                for d in r['speakers'].values():
+                    off = '（画外）' if d['offscreen'] else ''
+                    print(f"    {d['name']}{off}: {d['lines']} 句, 平均 {d['mean']} {r['unit']}, 问句 {d['questions']}")
+            act = r.get('action')
+            if act:
+                run = f" · 最长连续对白 {act['dialogue_run']} 句" if r['n_lines'] else ''
+                print(f"  动作描写 {act['paras']} 段 · 最长一段约 {act['max_lines']} 行（标准版面一行 {ACTION_COLS} 格）{run}")
             for fl in r['flags']:
                 print('  ! ' + fl)
+            if act and act['marks']:
+                print('  动作描写里的心理词（表面线索：观众看不见的改成看得见的，或删；有意保留的不动）：')
+                for m in act['marks']:
+                    print(f"    行{m['line']} “{m['text']}”  ← {'、'.join(m['words'])}")
+            if not r['n_lines']:
+                continue
             if r['marked_lines']:
                 print('  词面线索（需人工判断）：')
                 for m in r['marked_lines']:
@@ -487,6 +594,11 @@ def main():
         if meta['other_lang_speeches'] and any(r['n_lines'] for r in results):
             o = 'zh' if meta['lang'] == 'en' else 'en'
             print(f"  另有 {meta['other_lang_speeches']} 段只有{LANG_NAME[o]}的台词未计入")
+        totals = unit_totals(results)
+        if totals:
+            print('  按场合计（对照节拍单每场的时长；估的是口播，不含动作和停顿）：')
+            for u, k, size, sec in totals:
+                print(f"    {u}：台词 {k} 句 · {size} {UNIT_NAME[meta['lang']]}" + (f" · 约 {sec:g} s" if sec is not None else ''))
     print('\n说明：以上是词面和结构线索，不是判断；阈值是通用默认。是否算问题，先对照本剧规则表（story/rules.md）和本场处境；'
           '判断标准是这句是否为该人物在当下处境中会对对方说的话。')
 

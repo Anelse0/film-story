@@ -86,7 +86,7 @@ def main():
         size = sum(size_of(x['text'], lang) for x in sc['lines'])
         dur = f"台词约 {round(size / per_sec, 1)} s" if per_sec else f"台词 {size} {unit}（约束文件没有制作参数，不估秒）"
         who = f"说话人 {len(table)}（画内 {len(on)}：{'、'.join(on) or '无'}" + (f"；画外 {len(off)}：{'、'.join(off)}" if off else '') + '）'
-        print(f"  场「{sc['title']}」：{who} · {dur}")
+        print(f"  场「{sc['mark'] + ' · ' if sc.get('mark') else ''}{sc['title']}」：{who} · {dur}")
         seen = [n for n in cons['人物'] if any(name_pattern(n).search(t) for _, t in sc['action'])]
         if seen:
             print(f"    动作描写提到的已登记人物：{'、'.join(seen)}（谁在场、谁同框以正文为准）")
