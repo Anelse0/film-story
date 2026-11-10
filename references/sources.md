@@ -206,7 +206,7 @@
 
 ## 工具
 
-依据是产品文档，不据此推断行业使用比例；本 skill 的字段与这些工具相似，不等于已经和它们对接。Marion 的访谈能支持她用 Final Draft。复核：沿用；标"11-09 核实"的两行是 2026-11-09 对原页核对的。
+依据是产品文档，不据此推断行业使用比例；本 skill 的字段与这些工具相似，不等于已经和它们对接。Marion 的访谈能支持她用 Final Draft。复核：沿用；标"11-09 核实""11-10 核实"的是那一天对原页核对的。
 
 | 工具 | 已核实的能力 | 本 skill 的对应 |
 |---|---|---|
@@ -215,5 +215,5 @@
 | WriterDuet — https://www.writerduet.com/article/416-a-guide-to-effortless-co-writing-in-writerduet | 行内评论与回复、行历史、按作者识别修订 | 批注锚定场号与版本，保留提出者、理由和处理结果 |
 | Highland Pro — https://quoteunquoteapps.com/highland-pro/ | 场景导航、Shelf、修订工具 | 正文、备选与研究材料各有位置 |
 | Scriptation — https://help.scriptation.com/en/article/how-do-i-transfer-my-notes-1khpcd8/ | PDF 批注迁移到新稿，提示被改动或删除的关联文本 | 批注块随版本迁移（SKILL.md §4） |
-| Fountain — https://fountain.io/syntax/ | 公开的纯文本剧本格式。场景标题以 INT / EXT 等开头、前面空一行；角色名是全大写的一行，前面空一行、后面不空行，`@` 可强制；括注跟在角色名或对白后面；`>` 强制转场，`>文字<` 居中；场号写成 `#…#`；动作以外的元素行首缩进不计（11-09 核实） | `screenplay-format.md` §1 的元素规则；`scripts/render_screenplay.py` 读写 Fountain |
-| Final Draft 的格式说明 — https://www.finaldraft.com/learn/how-to-format-a-screenplay/ | Courier 12 pt；上边距 1 in、左边距约 1.5 in；对白左缩 1–1.5 in、右缩约 1.5 in，角色名比对白再缩约 1 in；括注少用；场景标题三项：INT. / EXT.、地点、时间（11-09 核实）。"一页约一分钟"原页只说版面便于按页数估时长，本 skill 当经验值用 | `screenplay-format.md` §5 的标准页；导出页的缩进取 1 in、1.5 in、2 in |
+| Fountain — https://fountain.io/syntax/ | 公开的纯文本剧本格式。场景标题以 INT / EXT 等开头、前面空一行；角色名是全大写的一行，前面空一行、后面不空行，`@` 可强制；括注跟在角色名或对白后面；`>` 强制转场，`>文字<` 居中；场号写成 `#…#`；动作以外的元素行首缩进不计（11-09 核实）。扉页：文件开头的键值对（示例里有 Title、Credit、Author、Source、Draft date、Contact），Title、Credit、Author、Source 居中，Draft date 和 Contact 在左下角，扉页后自动分页；原页没有提跨页对白怎么排（11-10 核实） | `screenplay-format.md` §1 的元素规则；`scripts/render_screenplay.py` 读写 Fountain；扉页的位置。版本一行放在 Credit 的位置、"说明"写成 Notes 键放左下角，是本 skill 的用法，原页的示例里没有 Notes 键 |
+| Final Draft 的格式说明 — https://www.finaldraft.com/learn/how-to-format-a-screenplay/ | Courier 12 pt；上边距 1 in、左边距约 1.5 in；对白左缩 1–1.5 in、右缩约 1.5 in，角色名比对白再缩约 1 in；括注少用；场景标题三项：INT. / EXT.、地点、时间（11-09 核实）。"一页约一分钟"原页只说版面便于按页数估时长，本 skill 当经验值用。页码在页眉靠右、离页顶约半英寸、后面带句点，第一页不编号；对白跨页时页底写 (MORE)，下一页的角色名后带 CONT'D；扉页中间是标题和作者，联系方式在左下角（11-10 核实） | `screenplay-format.md` §5 的标准页和 PDF；导出页的缩进取 1 in、1.5 in、2 in。原页说 (MORE) 居中，导出页排在角色名的缩进处 |

@@ -5,6 +5,7 @@
   python3 check_dialogue.py <剧本.md> [更多.md ...] [--lang auto|en|zh]
                             [--constraints <项目>/story/constraints.md] [--wps N] [--cps N] [--json]
 
+输入：Markdown 剧本文件；.pdf、.fountain 会先转成 Markdown 再读（PDF 要标准版式、带文字层，见 screenplay_pages.py），这时行号是转换后的。
 正文：只读 <!-- script-body:start --> 与 <!-- script-body:end --> 之间（可以有多段）；头部、本版改动、批注、备选台词
 在标记之外，不计入。没有标记的旧文件按全文读并提示；标记不成对时报格式问题，按能推断的范围读。
 一集一个文件时，每场开头的场标记 <!-- S03 · 名字 -->（或 <!-- 场 03 · 名字 -->）开始新的一场，带到输出里，文末按场
@@ -50,7 +51,7 @@ THRESH = {
     'action_lines_max': 4,    # 动作描写一段折合标准版面（一行 60 格）超过 4 行 → 提示"动作段偏长"
     'dialogue_run': 8,        # 连续 ≥8 句对白中间没有一段动作 → 提示核对听的人有没有反应的位置
 }
-ACTION_COLS = 60              # 标准版面动作描写一行的格数（Courier 12 pt，左 1.5 in、右 1 in）
+ACTION_COLS = 60              # 标准版面动作描写一行的格数（Courier 12 pt，左 1.5 in、右 1 in）；中文一个字 12 pt，一行 36 个字
 
 START = re.compile(r'<!--\s*script-body:start\s*-->')
 SCENE_MARK = re.compile(r'^<!--\s*((?:S|场\s*)\d+[a-z]?\b.*?)\s*-->$', re.I)  # 场标记：<!-- S03 · 名字 -->
@@ -65,7 +66,7 @@ PAREN_ONLY = re.compile(r'^[（(].*[)）]\s*$')
 QUOTED = re.compile(r'[“"]([^”"]+)[”"]')
 CJK = re.compile(r'[一-鿿]')
 FULLWIDTH = re.compile(r'[，。！？、；：（）《》]')
-SCENE_HEAD = re.compile(r'^(?:#+\s*)?(?:场\s*\d|SCENE\b|INT\.|EXT\.|EST\.|I/E\b|冷开)|^#+\s*\d{1,3}\s*[｜|]', re.I)
+SCENE_HEAD = re.compile(r'^(?:#+\s*)?(?:场\s*\d|SCENE\b|INT\.|EXT\.|EST\.|I/E\b|冷开|(?:内景|外景|内外景)\s)|^#+\s*\d{1,3}\s*[｜|]', re.I)
 H2 = re.compile(r'^##\s+\S')  # 有正文标记的文件里，二级标题都算场景标题
 TRANSITION = re.compile(r"^(?:>\s*)?(?:[A-Z][A-Z .']*\bTO:|FADE (?:IN|OUT)\s*[.:]?|(?:FADE|(?:SMASH )?CUT) TO BLACK\.?)$")
 WORD = re.compile(r"[A-Za-z][A-Za-z'’-]*")
@@ -179,9 +180,9 @@ def _speech(speaker, paren, no):
     return {'speaker': speaker, 'cue_paren': paren, 'parens': [], 'cand': {'en': [], 'zh': []}, 'first': '', 'no': no}
 
 
-def _inline(m, no, strict=False):
-    """同一行的"角色名：台词"。strict：正文用的是角色名单独一行的写法时，西文名字要像名字、台词要带引号才算，
-    免得把带冒号的动作描写（Pull back: … / The sign reads: "…"）当成台词。"""
+def _inline(m, no, strict=False, known=()):
+    """同一行的"角色名：台词"。strict：正文用的是角色名单独一行的写法时，台词要带引号，名字要像名字——西文看大小写，
+    中文要在别处当过角色名（known）——免得把带冒号的动作描写（Pull back: … / The sign reads: "…" / 纸条上写着：“…”）当成台词。"""
     spk, par, text = m.group(1).strip(), m.group(2) or '', m.group(3).strip()
     if spk in NON_SPEAKER:  # "汇合到：Vera：“…”" → Vera；"邮件：“…”" 是画面文字，不是台词
         m2 = CUE_INLINE.match(text) or NAME_LEAD.match(text)
@@ -190,7 +191,7 @@ def _inline(m, no, strict=False):
         spk, par, text = m2.group(1).strip(), m2.group(2) or '', m2.group(3).strip()
     if CJK.search(spk) and (spk in HEADER_WORDS or not QUOTED.search(text)):
         return None
-    if strict and not CJK.search(spk) and not (NAME_SHAPED.match(spk) and QUOTED.search(text)):
+    if strict and not ((spk in known if CJK.search(spk) else NAME_SHAPED.match(spk)) and QUOTED.search(text)):
         return None
     q = QUOTED.findall(text)
     text = ' '.join(q) if q else text
@@ -230,6 +231,12 @@ def has_tight_cue(body):
         if s and nxt and not SCENE_HEAD.match(s) and not TRANSITION.match(s) and cue_of(s) and not _block_end(nxt):
             return True
     return False
+
+
+def cue_names(body):
+    """正文里单独一行的角色名（下面紧跟台词的那种）。"""
+    return {cue_of(body[k][1].strip())[0] for k in range(len(body) - 1)
+            if cue_of(body[k][1].strip()) and body[k + 1][1].strip() and not _block_end(body[k + 1][1].strip())}
 
 
 def _tight_block(body, i, sp, cur):
@@ -272,13 +279,40 @@ def _has_content(sc):
     return bool(sc['headed'] or sc['speeches'] or sc['parens'] or sc['action'])
 
 
+_CONVERTED = {}
+
+
+CONVERTED_NOTE = '来源不是 Markdown：下面的行号是转成 Markdown 之后的（render_screenplay.py <文件> --md 得到的那一份）'
+
+
+def source_of(path):
+    """PDF、Fountain（.pdf / .fountain）先转成 Markdown 剧本（临时文件，退出时删掉），其余原样返回；.txt 照原样读
+    （旧稿有存成 .txt 的；Fountain 的 .txt 先用 render_screenplay.py --md 转）。读不了会抛 RuntimeError，说明里写原因。"""
+    p = Path(path)
+    if p.suffix.lower() not in ('.pdf', '.fountain'):
+        return path
+    key = str(p.resolve())
+    if key not in _CONVERTED:
+        import atexit, os, tempfile
+        import render_screenplay as rs
+        title, els = rs.read_any(p)
+        els, _ = rs.mark_translation(els)
+        tmp = tempfile.NamedTemporaryFile(prefix=p.stem + '-', suffix='.md', delete=False, mode='w', encoding='utf-8')
+        tmp.write(rs.to_markdown(title, rs.paragraphs(els), True))
+        tmp.close()
+        atexit.register(lambda f=tmp.name: os.path.exists(f) and os.unlink(f))
+        _CONVERTED[key] = tmp.name
+    return _CONVERTED[key]
+
+
 def parse(path, lang='auto'):
     """返回 (场景列表, 元信息)。场景（一个场景标题一段）：{'title', 'mark'（场标记）, 'lines', 'parens', 'action'}；lines 每句 {'speaker', 'text', 'paren',
     'raw_no', 'lang', 'offscreen'}。元信息：{'body', 'lang', 'other_lang_speeches', 'body_lines'}。"""
-    src = Path(path).read_text(encoding='utf-8').splitlines()
+    src = Path(source_of(path)).read_text(encoding='utf-8').splitlines()
     body, note = body_lines(src)
     scenes, cur = [], _scene('(开头)')
     tight, mark = has_tight_cue(body), ''
+    known = cue_names(body) if tight else ()
     i, n = 0, len(body)
     while i < n:
         no, raw = body[i]
@@ -319,7 +353,7 @@ def parse(path, lang='auto'):
             continue
         m = CUE_INLINE.match(s)
         if m:
-            sp = _inline(m, no, tight)
+            sp = _inline(m, no, tight, known)
             if sp:
                 if sp['cue_paren']:
                     cur['parens'].append(sp['cue_paren'])
@@ -372,8 +406,13 @@ def speaker_table(lines, names=None, lang='en'):
 
 
 def display_width(t):
-    """等宽版面上的格数：全角字符（中日韩文字、全角标点）算 2 格。"""
+    """终端等宽版面上的格数：全角字符（中日韩文字、全角标点）算 2 格。"""
     return sum(2 if unicodedata.east_asian_width(c) in 'WF' else 1 for c in t)
+
+
+def page_units(t):
+    """标准页上排出来的宽度（单位 2.4 pt）：西文一格 3 个单位（7.2 pt）；全角字符一个字 5 个单位（12 pt）。"""
+    return sum(5 if unicodedata.east_asian_width(c) in 'WF' else 3 for c in t)
 
 
 def mark_label(text):
@@ -399,7 +438,7 @@ def action_cues(scene):
     """动作描写的表面线索：段数、最长一段折合标准版面几行、看不见的心理词、最长一串中间没有动作段的对白。"""
     paras = action_paragraphs(scene)
     plain = [x for para in paras for x in para]
-    sizes = [(para[0][0], math.ceil(sum(display_width(t) for _, t in para) / ACTION_COLS)) for para in paras]
+    sizes = [(para[0][0], math.ceil(sum(page_units(t) for _, t in para) / (ACTION_COLS * 3))) for para in paras]
     marks = []
     for no, t in plain:
         words = sorted({m.group(0) for m in INNER_ZH.finditer(t)} | {m.group(0).lower() for m in INNER_EN.finditer(t)})
@@ -601,7 +640,12 @@ def main():
     ap.add_argument('--cps', type=float, help='中文语速（字/秒），临时覆盖配置')
     ap.add_argument('--json', action='store_true')
     a = ap.parse_args()
-    files = [report(f, a.lang, a.constraints, a.wps, a.cps) for f in a.files]
+    files = []
+    for f in a.files:
+        try:
+            files.append(report(f, a.lang, a.constraints, a.wps, a.cps))
+        except RuntimeError as err:  # 读不了的那一份单独报，别的照常
+            print(f'\n== {f} ==\n  ⚠ {err}', file=sys.stderr if a.json else sys.stdout)
     if a.json:
         print(json.dumps([dict(r, file=m['file'], body=m['body'], config=m['config'], rates=m['rates'],
                                other_lang_speeches=m['other_lang_speeches']) for m, rs in files for r in rs],
@@ -609,6 +653,8 @@ def main():
         return
     for meta, results in files:
         print(f"\n== {meta['file']} ==")
+        if source_of(meta['file']) != meta['file']:
+            print('  ' + CONVERTED_NOTE)
         print(describe(meta))
         for r in results:
             print(f"-- {'[' + r['mark'] + '] ' if r.get('mark') and r['mark'] != r['title'] else ''}{r['title']}")

@@ -10,18 +10,19 @@
   - 每场台词时长估算（约束文件有"制作参数"时）
 
 用法: python3 check_constraints.py <剧本.md> [--constraints <项目>/story/constraints.md] [--lang auto|en|zh]
-不给 --constraints 时从剧本文件往上找 story/constraints.md。约束文件格式见 templates/constraints.md。
+不给 --constraints 时从剧本文件往上找 story/constraints.md；找不到时只列占位符。约束文件格式见 templates/constraints.md。
+输入也可以是 .pdf / .fountain（先转成 Markdown 再查；这时不查头部必填项，行号是转换后的）。
 退出码恒为 0，不替人判。"""
 import argparse, re, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check_dialogue import START, END, body_lines, parse, size_of, speaker_table  # noqa: E402
+from check_dialogue import CONVERTED_NOTE, START, END, body_lines, parse, size_of, source_of, speaker_table  # noqa: E402
 from project_config import find_constraints, load_constraints  # noqa: E402
 
 FORMAT_CUES = {'voice', 'narrator', '旁白', '画外', '画外音', 'v.o.', 'o.s.'}  # 格式词，不是人名
 CAP = re.compile(r'\b([A-Z][a-z]{2,})\b')
 CAP_STOP = {'The', 'And', 'But', 'Okay', 'Yeah', 'Hey'}
-PLACEHOLDER = re.compile(r'\[(?:CANON[^\]]*|[A-Z][A-Z0-9 _/-]{1,30})\](?!\()')  # [AGENCY]、[CANON: …]；不算 Markdown 链接
+PLACEHOLDER = re.compile(r"\[(?:CANON[^\]]*|[A-Z][A-Z0-9 _/'’-]{1,30})\](?!\()")  # [AGENCY]、[SOMEONE'S SONG]、[CANON: …]；不算 Markdown 链接
 
 
 def caps_candidates(lines, known, places):
@@ -45,6 +46,11 @@ def name_pattern(n):
     return re.compile(re.escape(n))
 
 
+def placeholders(body):
+    holes = [f"行{no} {m.group(0)}" for no, t in body for m in PLACEHOLDER.finditer(t)]
+    return '无' if not holes else '；'.join(holes[:20]) + (f' 等 {len(holes)} 处' if len(holes) > 20 else '')
+
+
 def main():
     ap = argparse.ArgumentParser(description='约束检查（film-story）：只报线索，不替人判。')
     ap.add_argument('file')
@@ -52,28 +58,37 @@ def main():
     ap.add_argument('--lang', choices=('auto', 'en', 'zh'), default='auto')
     a = ap.parse_args()
     cfg = Path(a.constraints) if a.constraints else find_constraints(a.file)
-    if not cfg or not cfg.is_file():
+    try:
+        src = Path(source_of(a.file)).read_text(encoding='utf-8').splitlines()  # PDF、Fountain 先转成 Markdown
+    except RuntimeError as err:
+        print(f"== {a.file} ==\n  ⚠ {err}")
+        return
+    body, note = body_lines(src)
+    converted = source_of(a.file) != a.file
+    if not cfg or not cfg.is_file():  # 占位符不靠约束文件，照样列出来（别处来的稿常常不在项目里）
         print(f"== {a.file} ==\n  ⚠ 没有约束文件（{a.constraints or '往上没找到 story/constraints.md'}）；先按 templates/constraints.md 建一份")
+        if converted:
+            print('  ' + CONVERTED_NOTE)
+        print('  占位符（锁稿前清零）：' + placeholders(body))
         return
     cons = load_constraints(cfg)
-    src = Path(a.file).read_text(encoding='utf-8').splitlines()
-    body, note = body_lines(src)
     first = next((i for i, l in enumerate(src) if START.search(l) or END.search(l)), len(src))
     header = '\n'.join(src[:first])
     print(f"== {a.file} ==")
+    if converted:
+        print('  ' + CONVERTED_NOTE)
     if note == 'no-markers':
         print('  正文：未找到正文标记，按全文查（旧文件兼容）')
     elif note != 'markers':
         print(f'  ⚠ 正文标记不成对：{note}，按能推断的范围查；请修正标记')
     missing = [h for h in cons['必填头部'] if h not in header]
-    print('  头部必填项：' + ('齐' if not missing else '缺 ' + '、'.join(missing)))
+    print('  头部必填项：' + ('来源不是 Markdown，没有头部可查' if converted else '齐' if not missing else '缺 ' + '、'.join(missing)))
     hits = []
     for w in cons['禁用']:
         pat = re.compile(re.escape(w), re.I)
         hits += [f"行{no} “{w}”" for no, t in body if pat.search(t)]
     print('  禁用词（只查正文）：' + ('无' if not hits else '；'.join(hits)))
-    holes = [f"行{no} {m.group(0)}" for no, t in body for m in PLACEHOLDER.finditer(t)]
-    print('  占位符（锁稿前清零）：' + ('无' if not holes else '；'.join(holes[:20]) + (f' 等 {len(holes)} 处' if len(holes) > 20 else '')))
+    print('  占位符（锁稿前清零）：' + placeholders(body))
 
     names = {n.casefold(): n for n in cons['人物']}
     places = {p.casefold() for p in cons['地点']}

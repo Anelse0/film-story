@@ -12,10 +12,14 @@
   python3 compare_drafts.py <剧本.md> --rev HEAD [--brief …]   和 git 里的那一版比（HEAD、HEAD~1、tag、提交号都行）
   python3 compare_drafts.py <剧本.md> --brief <精修简报.md>     不比稿，只核对锁定的台词和指定改法
   python3 compare_drafts.py <英文版.md> <中文版.md> --dialogue-only   只比对白：两个语言版本的台词是不是逐句相同
+  加 --out <改动清单.md> 把结果另存成一份 Markdown（每版交付的改动清单从这里起，再逐条补上为什么）。
+文件可以是 Markdown 剧本，也可以直接给 .pdf、.fountain（先转成 Markdown 再比）。
 
 只比正文（<!-- script-body:start/end --> 之间），只比全文多数台词的那种语言，对照翻译行不比。两版都有场标记时按
-场标记对齐，否则按场景标题对齐。句子靠字面相似度配对：同一个说话人、改动不大的算"改"，其余算"删"和"加"；
-挪了位置的句子会显示成一删一加。
+场标记对齐，否则按场景标题对齐；只比对白（--dialogue-only）而又没有场标记时按场景的先后对齐，因为两个语言版本
+的场景标题写法不同。句子靠字面相似度配对：同一个说话人、改动不大的算"改"，其余算"删"和"加"；
+挪了位置的句子会显示成一删一加。一句话被中间插进来的动作拆成连着的几句（或连着的几句并成一句）、同一个说话人、
+词没变的，单列成"拆""并"，不算改动；隔着别人的话的不算。锁定的台词被这样拆开的，单独提示，不算少了。
 
 简报里脚本读三样（写法见 templates/polish-brief.md）：
   - "锁定的台词"一节里的行：`- S03 > 原句`
@@ -24,7 +28,7 @@
 场号 S03、s3、场 03 算同一场。剧本不是每场都有场标记时，锁定的台词和指定改法在全文里找，登记的局部重写认不出，
 输出里会提示。
 只报事实，不判好坏；退出码恒为 0。"""
-import argparse, difflib, json, os, re, subprocess, sys, tempfile
+import argparse, contextlib, difflib, io, json, os, re, subprocess, sys, tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -88,6 +92,45 @@ def diff_items(old, new, same_owner, text_of, threshold, key_of=repr):
     return changed, removed, added
 
 
+def regroup(old, new):
+    """先把拆句和并句挑出来。拆：旧的一句 == 新的连着几句接起来——同一个说话人，中间没有别人说话（隔着动作可以），
+    词没变。并：反过来。只在两版对不上的那一段里找，隔开的句子不算。
+    返回 (拆 [(旧, [新…])], 并 [([旧…], 新)], 剩下的旧, 剩下的新)。"""
+    key = lambda x: (x[0].casefold(), x[1])  # noqa: E731
+    split, merged, used_old, used_new = [], [], set(), set()
+
+    def run(one, many, lo, hi, used):
+        """many[lo:hi] 里有没有连着的几句，接起来正好是 one。"""
+        target = squash(one[1])
+        for j in range(lo, hi):
+            acc, k = '', j
+            while k < hi and k not in used and many[k][0].casefold() == one[0].casefold() and squash(many[k][1]) \
+                    and target.startswith(acc + squash(many[k][1])):
+                acc += squash(many[k][1])
+                k += 1
+            if target and acc == target and k - j > 1:
+                return range(j, k)
+        return None
+
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, [key(x) for x in old], [key(x) for x in new], autojunk=False).get_opcodes():
+        if tag == 'equal':
+            continue
+        for i in range(i1, i2):
+            hit = run(old[i], new, j1, j2, used_new)
+            if hit:
+                split.append((old[i], [new[j] for j in hit]))
+                used_old.add(i)
+                used_new.update(hit)
+        for j in range(j1, j2):
+            hit = None if j in used_new else run(new[j], old, i1, i2, used_old)
+            if hit:
+                merged.append(([old[i] for i in hit], new[j]))
+                used_new.add(j)
+                used_old.update(hit)
+    return (split, merged, [x for i, x in enumerate(old) if i not in used_old],
+            [x for j, x in enumerate(new) if j not in used_new])
+
+
 def volume(lines, lang, rate):
     size = sum(cd.size_of(t, lang) for _, t in lines)
     return size, (round(size / rate, 1) if rate else None)
@@ -125,6 +168,11 @@ def norm(text):
     return re.sub(r'\s+', ' ', text.translate(QUOTES)).strip()
 
 
+def squash(text):
+    """不计空格：两句接起来和原来那一句比的时候用（中文接的时候没有空格）。"""
+    return re.sub(r'\s+', '', text.translate(QUOTES))
+
+
 def pool_of(us, by_mark, scene):
     """这一场的台词。没有按场标记对齐时在全文里找；按场标记对齐而剧本里没有这一场，返回 None。"""
     if not by_mark:
@@ -134,18 +182,22 @@ def pool_of(us, by_mark, scene):
 
 
 def check_locked(us, by_mark, locked):
-    """锁定的台词是不是逐字都在（在它那一场的某句台词里）。
-    返回 {'total', 'missing': [{'scene', 'text', 'closest', 'no_scene'}]}。"""
-    missing = []
+    """锁定的台词是不是逐字都在（在它那一场的某句台词里）。词都在、但被拆到了连着的两三句里的，单列。
+    返回 {'total', 'missing': [{'scene', 'text', 'closest', 'no_scene'}], 'split': [{'scene', 'text'}]}。"""
+    missing, split = [], []
     for scene, text in locked:
         pool = pool_of(us, by_mark, scene)
         if pool is None:
             missing.append({'scene': scene, 'text': text, 'closest': '', 'no_scene': True})
-        elif not any(norm(text) in norm(t) for t in pool):
+        elif any(norm(text) in norm(t) for t in pool):
+            continue
+        elif any(squash(text) in squash(''.join(pool[k:k + n])) for n in (2, 3) for k in range(len(pool) - n + 1)):
+            split.append({'scene': scene, 'text': text})
+        else:
             best = max(pool or [''], key=lambda t: ratio(norm(text), norm(t)))
             missing.append({'scene': scene, 'text': text, 'no_scene': False,
                             'closest': best if ratio(norm(text), norm(best)) >= 0.5 else ''})
-    return {'total': len(locked), 'missing': missing}
+    return {'total': len(locked), 'missing': missing, 'split': split}
 
 
 def check_edits(us, by_mark, edits):
@@ -190,8 +242,17 @@ def compare(old_path, new_path, lang='auto', constraints=None, wps=None, cps=Non
     by_mark = states == {'all'}
     marks = 'all' if by_mark else 'none' if states == {'none'} else 'some'
     old, new = units(old_scenes, by_mark), units(new_scenes, by_mark)
-    locked, edits, rewrite = read_brief(brief) if brief else ([], [], set())
+    counts = [len(old), len(new)]
     found = []  # (场的 key 或 None, 说明)
+    if dialogue_only and not by_mark:  # 两个语言版本：标题对不上，按先后配；个数不同就整份当一段比，并照实报
+        if counts[0] != counts[1]:
+            whole = lambda us: {'(全文)': {'label': '(全文)', 'titles': [], 'paras': [],  # noqa: E731
+                                         'lines': [x for u in us.values() for x in u['lines']]}}
+            old, new = whole(old), whole(new)
+            found.append((None, f'场景标题的个数不同：{counts[0]} → {counts[1]}，没法一场对一场，整份按先后比'))
+        else:
+            old, new = ({f'#{k}': u for k, u in enumerate(us.values(), 1)} for us in (old, new))
+    locked, edits, rewrite = read_brief(brief) if brief else ([], [], set())
     for k in old:
         if k not in new:
             found.append((k, f"少了场：{old[k]['label']}"))
@@ -216,14 +277,20 @@ def compare(old_path, new_path, lang='auto', constraints=None, wps=None, cps=Non
         if lost or got:
             found.append((k, f"{tag}：说话人" + '；'.join(x for x in ('少了 ' + '、'.join(lost) if lost else '',
                                                                  '多了 ' + '、'.join(got) if got else '') if x)))
-        lc, lr, la = diff_items(o['lines'], n['lines'], lambda a, b: a[0].casefold() == b[0].casefold(),
+        split, merged, rest_old, rest_new = regroup(o['lines'], n['lines'])
+        lc, lr, la = diff_items(rest_old, rest_new, lambda a, b: a[0].casefold() == b[0].casefold(),
                                 lambda x: x[1], PAIR['line'], key_of=lambda x: (x[0].casefold(), x[1]))
         pc, pr, pa = ([], [], []) if dialogue_only else diff_items(o['paras'], n['paras'], lambda a, b: True,
                                                                    lambda x: x, PAIR['para'])
         (s0, t0), (s1, t1) = volume(o['lines'], lang, rate), volume(n['lines'], lang, rate)
         per.append({'scene': n['label'], 'lines': [len(o['lines']), len(n['lines'])], 'size': [s0, s1], 'seconds': [t0, t1],
                     'line_changed': len(lc), 'line_removed': len(lr), 'line_added': len(la),
+                    'line_split': len(split), 'line_merged': len(merged),
                     'para_changed': len(pc), 'para_removed': len(pr), 'para_added': len(pa)})
+        items += [{'scene': tag, 'kind': '拆', 'what': 'line', 'old': a[1], 'new': ' ｜ > '.join(x[1] for x in parts),
+                   'speaker': a[0]} for a, parts in split]
+        items += [{'scene': tag, 'kind': '并', 'what': 'line', 'old': ' ｜ > '.join(x[1] for x in parts), 'new': a[1],
+                   'speaker': a[0]} for parts, a in merged]
         items += [{'scene': tag, 'kind': '改', 'what': 'line', 'old': a[1], 'new': b[1], 'speaker': b[0]} for a, b in lc]
         items += [{'scene': tag, 'kind': '删', 'what': 'line', 'old': a[1], 'speaker': a[0]} for a in lr]
         items += [{'scene': tag, 'kind': '加', 'what': 'line', 'new': b[1], 'speaker': b[0]} for b in la]
@@ -232,7 +299,7 @@ def compare(old_path, new_path, lang='auto', constraints=None, wps=None, cps=Non
         items += [{'scene': tag, 'kind': '加', 'what': 'para', 'new': b} for b in pa]
     total = lambda us: (sum(len(u['lines']) for u in us.values()), sum(len(u['paras']) for u in us.values()),  # noqa: E731
                         volume([x for u in us.values() for x in u['lines']], lang, rate))
-    return {'lang': lang, 'by_mark': by_mark, 'marks': marks, 'n_units': [len(old), len(new)],
+    return {'lang': lang, 'by_mark': by_mark, 'marks': marks, 'n_units': counts,
             'dialogue_only': dialogue_only, 'unseen_rewrite': bool(rewrite) and not by_mark,
             'structure': [msg for k, msg in found if k not in rewrite],
             'declared': [msg for k, msg in found if k in rewrite],
@@ -264,7 +331,7 @@ def from_git(path, rev):
     got = subprocess.run(['git', '-C', str(root), 'show', f'{rev}:{rel}'], capture_output=True)
     if got.returncode:
         return None, f'git 里没有 {rev}:{rel}（这个文件在那一版还没提交过？）'
-    tmp = tempfile.NamedTemporaryFile(prefix='old-', suffix='.md', delete=False)
+    tmp = tempfile.NamedTemporaryFile(prefix='old-', suffix=p.suffix or '.md', delete=False)
     tmp.write(got.stdout)
     tmp.close()
     return tmp.name, ''
@@ -280,14 +347,18 @@ def show_locked(lk, marks='all'):
         print(f"  ⚠ {MARKS_NOTE[marks]}：锁定的台词和指定改法在全文里找，不分场。")
     if not lk['total']:
         print('  锁定的台词：简报里没有列（"锁定的台词"一节下面写 `- S03 > 原句`）。')
-    elif not lk['missing']:
+    elif not lk['missing'] and not lk['split']:
         print(f"  锁定的台词：{lk['total']} 句逐字都在。")
-    else:
+    if lk['missing']:
         print(f"  ⚠ 锁定的台词少了 {len(lk['missing'])} 句（共 {lk['total']} 句）：")
         for x in lk['missing']:
             why = '剧本里没有这一场的场标记' if x['no_scene'] else \
                 f"现在最接近的一句：{x['closest']}" if x['closest'] else '这一场里找不到接近的'
             print(f"    - {x['scene']} > {x['text']}（{why}）")
+    if lk['split']:
+        print(f"  ⚠ 锁定的台词有 {len(lk['split'])} 句被拆开了（词都在，分到了连着的几句里；算不算数由用户定）：")
+        for x in lk['split']:
+            print(f"    - {x['scene']} > {x['text']}")
 
 
 def show_edits(ed):
@@ -304,11 +375,13 @@ def show_edits(ed):
 
 
 def show(r, old_name, new_name):
+    """打印比稿结果。"""
     c = lambda key: sum(s[key] for s in r['scenes'])  # noqa: E731
     sec = lambda t: f"约 {t:g} s" if t is not None else ''  # noqa: E731
     (ol, op, (osz, ot)), (nl, np_, (nsz, nt)) = r['old_total'], r['new_total']
     print(f"== 比稿：{old_name} → {new_name} ==")
     how = f"按场标记对齐（{r['n_units'][0]} → {r['n_units'][1]} 场）" if r['by_mark'] else \
+        f"{MARKS_NOTE[r['marks']]}，按场景的先后对齐（{r['n_units'][0]} → {r['n_units'][1]} 个）" if r['dialogue_only'] else \
         f"{MARKS_NOTE[r['marks']]}，按场景标题对齐（{r['n_units'][0]} → {r['n_units'][1]} 个）"
     print(f"  语言：{cd.LANG_NAME[r['lang']]} · {how}" + (' · 只比对白' if r['dialogue_only'] else ''))
     if 'no-markers' in r['body']:
@@ -329,7 +402,8 @@ def show(r, old_name, new_name):
     show_locked(r['locked'], r['marks'])
     show_edits(r['edits'])
     vol = f" · {osz} → {nsz} {r['unit']}" + (f"（{sec(ot)} → {sec(nt)}）" if ot is not None else '')
-    print(f"  台词：{ol} → {nl} 句 · 改 {c('line_changed')} · 删 {c('line_removed')} · 加 {c('line_added')}{vol}")
+    moved = ''.join(f" · {name} {c(key)}" for key, name in (('line_split', '拆'), ('line_merged', '并')) if c(key))
+    print(f"  台词：{ol} → {nl} 句 · 改 {c('line_changed')} · 删 {c('line_removed')} · 加 {c('line_added')}{moved}{vol}")
     if not r['dialogue_only']:
         print(f"  动作：{op} → {np_} 段 · 改 {c('para_changed')} · 删 {c('para_removed')} · 加 {c('para_added')}")
     if r['performance']:
@@ -341,13 +415,16 @@ def show(r, old_name, new_name):
         for s in touched:
             t = f" · {sec(s['seconds'][0])} → {sec(s['seconds'][1])}" if s['seconds'][0] is not None else ''
             act = '' if r['dialogue_only'] else f" · 动作 改 {s['para_changed']} 删 {s['para_removed']} 加 {s['para_added']}"
-            print(f"    {s['scene']}：台词 改 {s['line_changed']} 删 {s['line_removed']} 加 {s['line_added']}{t}{act}")
+            moved = ''.join(f" {name} {s[key]}" for key, name in (('line_split', '拆'), ('line_merged', '并')) if s[key])
+            print(f"    {s['scene']}：台词 改 {s['line_changed']} 删 {s['line_removed']} 加 {s['line_added']}{moved}{t}{act}")
     lines = [x for x in r['items'] if x['what'] == 'line']
     paras = [x for x in r['items'] if x['what'] == 'para']
     if lines:
         print('\n  本版改动 · 台词（贴进剧本头部之前逐条核对；脚本只对字面）：')
         for x in lines:
-            if x['kind'] == '改':
+            if x['kind'] in ('拆', '并'):
+                print(f"  - {x['scene']} {x['kind']}：> {x['old']} → > {x['new']}（词没变）")
+            elif x['kind'] == '改':
                 print(f"  - {x['scene']} 改：> {x['old']} → > {x['new']}")
             else:
                 print(f"  - {x['scene']} {x['kind']}：> {x.get('old') or x.get('new')}（{x['speaker']}）")
@@ -365,12 +442,28 @@ def show(r, old_name, new_name):
     print('\n说明：只对字面，不判好坏。结构一行不干净，说明这一轮动了没登记的场、场景标题或说话人。')
 
 
+def as_markdown(text, old_name, new_name):
+    """把打印出来的比稿结果整理成一份 Markdown 改动清单。"""
+    out = [f'# 改动清单 · {old_name} → {new_name}', '',
+           '脚本只对字面列出改了什么；每条后面补一句为什么（对应哪条意见）。', '']
+    for line in text.splitlines()[1:]:
+        s = line.strip()
+        if not s or s.startswith('说明：'):
+            continue
+        if s.startswith(('本版改动', '动作段的变化', '按场')):
+            out += ['', '## ' + s.rstrip('：')]
+        else:
+            out.append('- ' + (s[2:] if s.startswith('- ') else s))
+    return '\n'.join(out) + '\n'
+
+
 def main():
     ap = argparse.ArgumentParser(description='比稿（film-story）：两版剧本的结构有没有变、改了哪些句子；带精修简报时核对锁定的台词和指定改法。')
     ap.add_argument('files', nargs='+', help='旧稿 新稿；或只给一个文件，加 --rev 或 --brief')
     ap.add_argument('--rev', help='和 git 里的这一版比（只给一个文件时用），如 HEAD')
     ap.add_argument('--brief', help='精修简报：核对锁定的台词和指定改法；登记了局部重写的场，结构变化单列')
     ap.add_argument('--dialogue-only', action='store_true', help='只比对白，不比动作和场景标题（核对两个语言版本）')
+    ap.add_argument('--out', help='把比稿结果另存成 Markdown 改动清单')
     ap.add_argument('--lang', choices=('auto', 'en', 'zh'), default='auto')
     ap.add_argument('--constraints', help='项目约束文件；不给时从新稿往上找 story/constraints.md')
     ap.add_argument('--wps', type=float, help='英文语速（词/秒），临时覆盖配置')
@@ -380,9 +473,18 @@ def main():
     if a.brief and not Path(a.brief).is_file():
         print(f'== 比稿 ==\n  ⚠ 找不到精修简报：{a.brief}')
         return
+    if a.out and not Path(a.out).resolve().parent.is_dir():
+        print(f'== 比稿 ==\n  ⚠ 要写到的目录不存在：{Path(a.out).resolve().parent}')
+        return
     tmp = None
     if len(a.files) == 1 and a.brief and not a.rev:
-        r = locked_only(a.files[0], a.brief, a.lang)
+        try:
+            r = locked_only(a.files[0], a.brief, a.lang)
+        except RuntimeError as err:
+            print(f'== 比稿 ==\n  ⚠ {err}')
+            return
+        if a.out:
+            print('（--out 没有写：只给一份稿时只核对锁定的台词，没有两版可比）', file=sys.stderr if a.json else sys.stdout)
         if a.json:
             print(json.dumps(r, ensure_ascii=False, indent=2))
         else:
@@ -406,13 +508,23 @@ def main():
         return
     try:
         r = compare(old, new, a.lang, a.constraints, a.wps, a.cps, a.brief, a.dialogue_only)
+    except RuntimeError as err:
+        print(f'== 比稿 ==\n  ⚠ {err}')
+        return
     finally:
         if tmp:
             os.unlink(tmp)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        show(r, old_name, Path(new).name)
+    if a.out:
+        Path(a.out).write_text(as_markdown(buf.getvalue(), old_name, Path(new).name), encoding='utf-8')
     if a.json:
         print(json.dumps(r, ensure_ascii=False, indent=2))
     else:
-        show(r, old_name, Path(new).name)
+        print(buf.getvalue(), end='')
+        if a.out:
+            print(f'改动清单已写到 {a.out}')
 
 
 if __name__ == '__main__':

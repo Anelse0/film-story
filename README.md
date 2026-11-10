@@ -11,7 +11,7 @@
 Claude Code 里 `/film-story`，或直接说"下一集写什么 / 这段戏怎么接 / 这场写不下去 / 润色一下 / 对话太工整 / 这句不像他会说的 / 这版哪里不对"。
 
 ## 脚本
-四个脚本读的都是 `<!-- script-body:start -->` 与 `<!-- script-body:end -->` 之间的正文，退出码恒为 0。两个检查脚本和比稿脚本只报线索；没有标记的旧文件按全文读，并提示。约束检查另外读标记之前的头部；比稿另外读精修简报；导出脚本是转换格式，输入也可以是 `.fountain` / `.txt`。
+四个脚本读的都是 `<!-- script-body:start -->` 与 `<!-- script-body:end -->` 之间的正文，退出码恒为 0。两个检查脚本和比稿脚本只报线索；没有标记的旧文件按全文读，并提示。约束检查另外读标记之前的头部；比稿另外读精修简报；导出脚本是转换格式，输入可以是 `.pdf` / `.fountain` / `.txt`；检查和比稿脚本也可以直接读 `.pdf` / `.fountain`（PDF 要是标准版式、带文字层的；这时行号是转成 Markdown 之后的）。
 
 ```bash
 python3 ~/.claude/skills/film-story/scripts/check_dialogue.py <剧本.md>
@@ -20,7 +20,7 @@ python3 ~/.claude/skills/film-story/scripts/check_dialogue.py <剧本.md>
 python3 ~/.claude/skills/film-story/scripts/check_constraints.py <剧本.md>
 ```
 ```bash
-python3 ~/.claude/skills/film-story/scripts/render_screenplay.py <剧本.md> --html <整集.html>
+python3 ~/.claude/skills/film-story/scripts/render_screenplay.py <剧本.md> --pdf <整集.pdf>
 ```
 ```bash
 python3 ~/.claude/skills/film-story/scripts/compare_drafts.py <旧稿.md> <新稿.md>
@@ -31,10 +31,11 @@ python3 ~/.claude/skills/film-story/scripts/compare_drafts.py <旧稿.md> <新�
 - 时长：读约束文件的 `## 制作参数`（英文语速、中文语速、单条生成上限）；`--wps` / `--cps` 临时指定；都没有就只报词数或字数。估的是口播时长，不是成片时长。
 - 动作描写线索（只在有正文标记的文件上给）：动作段偏长、动作里的心理词、连续对白中间没有动作段。
 - 表演线索（同上，只数不判）：人物停手、停顿、对视各几处，口头填充词、没说完的句子各几句，并列出停手的那几行。做表演驱动的对白精修时前后对比用。
-- 占位符：`check_constraints.py` 列出正文里剩下的 `[AGENCY]`、`[CANON: …]` 这类标记，锁稿前清零。
+- 占位符：`check_constraints.py` 列出正文里剩下的 `[AGENCY]`、`[CANON: …]` 这类标记，锁稿前清零；没有约束文件时也列。
 - 场标记：剧本一集一个文件，每场开头一行 `<!-- S03 · 名字 -->`，从这里开始新的一场；检查脚本的输出带场号，文末按场合计台词量。S03、s3、场 03 算同一场。有正文标记的文件里，二级标题都算场景标题。
-- 导出：`render_screenplay.py` 不带输出选项时在终端里排出标准版面并报行数、页数；`--scene S03` 只取一场，`--html` 出标准页（Courier 12 pt，可打印成 PDF），`--fountain` 出 Fountain，`--md` 写成 Markdown（Fountain / txt 转入、取出单场、把一场一个文件的旧稿拼成一份）；`--no-translation` 去掉对照翻译行。格式见 `references/screenplay-format.md`。
-- 比稿：`compare_drafts.py` 对两版剧本，报结构有没有变（场、场景标题、每场的说话人）和改了哪些句子（台词按"旧句 → 新句"列出）；只给一个文件加 `--rev HEAD` 是和 git 里的那一版比。精修之后"结构"一行应该是干净的。加 `--brief <精修简报.md>` 核对锁定的台词逐字都在、指定改法都改了，简报里登记了局部重写的场不算越界；另报表演线索前后的数；加 `--dialogue-only` 只比对白，用来核对两个语言版本。
+- 导出：`render_screenplay.py` 不带输出选项时在终端里排出标准版面并报页数；`--scene S03` 只取一场，`--pdf` 出 PDF（Courier 12 pt 的标准页；扉页取自剧本头部，页码从正文第二页起，对白跨页有 `(MORE)` / `(CONT'D)`；头部有"页数："一行时回填），`--html` 是同一份排好的页，`--fountain` 出 Fountain，`--md` 写成 Markdown（PDF / Fountain / txt 转入、取出单场、把一场一个文件的旧稿拼成一份）；`--no-translation` 去掉对照翻译行。格式、读 PDF 的限制见 `references/screenplay-format.md` §5。
+- 依赖：出 PDF 要本机有 Chrome、Chromium 或 Edge；读 PDF 要 macOS（经 `swift` 用系统自带的 PDFKit）。缺了脚本会写明，其余功能不受影响。
+- 比稿：`compare_drafts.py` 对两版剧本，报结构有没有变（场、场景标题、每场的说话人）和改了哪些句子（台词按"旧句 → 新句"列出）；只给一个文件加 `--rev HEAD` 是和 git 里的那一版比。精修之后"结构"一行应该是干净的。加 `--brief <精修简报.md>` 核对锁定的台词逐字都在、指定改法都改了，简报里登记了局部重写的场不算越界；另报表演线索前后的数；一句拆成连着的两三句、或连着的几句并成一句，词没变的单列成"拆 / 并"，不算删和加；加 `--dialogue-only` 只比对白，用来核对两个语言版本；加 `--out <改动清单.md>` 把结果另存成一份改动清单。
 - 说话人分画内 / 画外（角色名或括注里有电话里、画外、旁白、V.O. 等）；同框人数要看动作描写，脚本不推算。
 
 ## 测试
